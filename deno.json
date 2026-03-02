@@ -1,0 +1,19 @@
+{
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "build": "mkdir -p build && cp src/appsscript.json build/ && deno run -A npm:typescript/bin/tsc",
+    "push": "deno task build && deno run -A npm:@google/clasp push",
+    "pull": "deno run -A npm:@google/clasp pull",
+    "open": "deno run -A npm:@google/clasp open"
+  },
+  "imports": {
+    "@google/clasp": "npm:@google/clasp@^3.2.0",
+    "@types/google-apps-script": "npm:@types/google-apps-script@^1.0.0",
+    "typescript": "npm:typescript@^5.0.0"
+  },
+  "compilerOptions": {
+    "types": ["npm:@types/google-apps-script"],
+    "lib": ["ES2019"],
+    "strict": true
+  }
+}
