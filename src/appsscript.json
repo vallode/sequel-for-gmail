@@ -15,15 +15,14 @@
       "name": "Follow-Up Reminders",
       "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/reply_all_black_48dp.png",
       "layoutProperties": {
-        "primaryColor": "#e53935",
-        "secondaryColor": "#ff8f00"
-      },
-      "homepageTrigger": {
-        "runFunction": "buildAddOn",
-        "enabled": true
+        "primaryColor": "#ffffff"
       }
     },
     "gmail": {
+      "homepageTrigger": {
+        "runFunction": "buildAddOn",
+        "enabled": true
+      },
       "contextualTriggers": [
         {
           "unconditional": {},
