@@ -1,6 +1,9 @@
 const PROPS = PropertiesService.getUserProperties();
+
 const DEFAULT_DAYS = 3;
-const DEFAULT_EXCLUDE_REPLIED = true;
+const DEFAULT_AUTO_LABEL = "";
+const DEFAULT_EXCLUDED_DOMAINS = "";
+const DEFAULT_STALE_DAYS = 90;
 
 interface PendingEmail {
   threadId: string;
@@ -16,14 +19,53 @@ interface ActionEvent {
 
 // ── Entry Points ─────────────────────────────────────────────
 
-function buildAddOn(e: ActionEvent): GoogleAppsScript.Card_Service.Card {
+function _buildAddOn(e: ActionEvent): GoogleAppsScript.Card_Service.Card {
   return buildHomepage(e);
 }
 
 function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
-  return CardService.newCardBuilder().setHeader(
+  const days = parseInt(
+    PROPS.getProperty("followup_days") || String(DEFAULT_DAYS),
+  );
+  const excludeReplied = PROPS.getProperty("exclude_replied") !== "false";
+  const autoLabel = PROPS.getProperty("auto_label") || DEFAULT_AUTO_LABEL;
+  const excludedDomains = PROPS.getProperty("excluded_domains") ||
+    DEFAULT_EXCLUDED_DOMAINS;
+  const staleDays = parseInt(
+    PROPS.getProperty("stale_days") || String(DEFAULT_STALE_DAYS),
+  );
+
+  const card = CardService.newCardBuilder().setHeader(
     CardService.newCardHeader().setTitle("Settings"),
-  ).build();
+  );
+
+  const saveButton = CardService.newTextButton()
+    .setText("Save & Refresh")
+    .setOnClickAction(
+      CardService.newAction().setFunctionName("_onSaveSettings"),
+    )
+    .setTextButtonStyle(CardService.TextButtonStyle.FILLED);
+
+  const backButton = CardService.newTextButton().setText("Go Back")
+    .setOnClickAction(CardService.newAction().setFunctionName("_onBack"))
+    .setTextButtonStyle(CardService.TextButtonStyle.TEXT);
+
+  card.addSection(
+    buildSettingsSection(
+      days,
+      excludeReplied,
+      autoLabel,
+      excludedDomains,
+      staleDays,
+    ),
+  );
+
+  card.setFixedFooter(
+    CardService.newFixedFooter().setPrimaryButton(saveButton)
+      .setSecondaryButton(backButton),
+  );
+
+  return card.build();
 }
 
 function buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
@@ -31,17 +73,25 @@ function buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
     PROPS.getProperty("followup_days") || String(DEFAULT_DAYS),
   );
   const excludeReplied = PROPS.getProperty("exclude_replied") !== "false";
-  const emails = getPendingFollowUps(days, excludeReplied);
+  const autoLabel = PROPS.getProperty("auto_label") || DEFAULT_AUTO_LABEL;
+  const excludedDomains = PROPS.getProperty("excluded_domains") ||
+    DEFAULT_EXCLUDED_DOMAINS;
+  const staleDays = parseInt(
+    PROPS.getProperty("stale_days") || String(DEFAULT_STALE_DAYS),
+  );
+  const emails = getPendingFollowUps(
+    days,
+    excludeReplied,
+    excludedDomains,
+    autoLabel,
+    staleDays,
+  );
 
-  const card = CardService.newCardBuilder()
-    .addCardAction(
-      CardService.newCardAction().setText("Gmail").setOpenLink(
-        CardService.newOpenLink().setUrl("https://mail.google.com/mail"),
-      ),
-    );
-
-  // Settings section
-  card.addSection(buildSettingsSection(days, excludeReplied));
+  const card = CardService.newCardBuilder().addCardAction(
+    CardService.newCardAction().setText("Settings").setOnClickAction(
+      CardService.newAction().setFunctionName("_openSettingsCard"),
+    ),
+  );
 
   // Results section
   card.addSection(buildResultsSection(emails, days));
@@ -54,11 +104,11 @@ function buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
 function buildSettingsSection(
   days: number,
   excludeReplied: boolean,
+  autoLabel: string,
+  excludedDomains: string,
+  staleDays: number,
 ): GoogleAppsScript.Card_Service.CardSection {
-  const section = CardService.newCardSection()
-    .setHeader("⚙️ Settings")
-    .setCollapsible(true)
-    .setNumUncollapsibleWidgets(0);
+  const section = CardService.newCardSection();
 
   const daysInput = CardService.newTextInput()
     .setFieldName("followup_days")
@@ -75,47 +125,34 @@ function buildSettingsSection(
         .setValue("true")
         .setSelected(excludeReplied)
         .setOnChangeAction(
-          CardService.newAction().setFunctionName("onToggleExcludeReplied"),
+          CardService.newAction().setFunctionName("_onToggleExcludeReplied"),
         ),
     );
 
-  const saveButton = CardService.newTextButton()
-    .setText("Save & Refresh")
-    .setOnClickAction(
-      CardService.newAction().setFunctionName("onSaveSettings"),
-    )
-    .setTextButtonStyle(CardService.TextButtonStyle.FILLED);
+  const autoLabelInput = CardService.newTextInput()
+    .setFieldName("auto_label")
+    .setTitle("Auto-label (optional)")
+    .setValue(autoLabel)
+    .setHint("Label name to apply to follow-up threads");
 
-  const dailyDigestButton = CardService.newTextButton()
-    .setText("Enable Daily Digest Email")
-    .setOnClickAction(
-      CardService.newAction().setFunctionName("onEnableDailyDigest"),
-    );
+  const excludedDomainsInput = CardService.newTextInput()
+    .setFieldName("excluded_domains")
+    .setTitle("Excluded domains (optional)")
+    .setValue(excludedDomains)
+    .setHint("Comma-separated, e.g. company.com,slack.com");
 
-  const disableDigestButton = CardService.newTextButton()
-    .setText("Disable Daily Digest")
-    .setOnClickAction(
-      CardService.newAction().setFunctionName("onDisableDailyDigest"),
-    );
-
-  const digestStatus = hasDailyTrigger()
-    ? "✅ Daily digest is active (runs at 8 AM)"
-    : "⭕ Daily digest is off";
+  const staleDaysInput = CardService.newTextInput()
+    .setFieldName("stale_days")
+    .setTitle("Ignore emails older than (days)")
+    .setValue(staleDays.toString())
+    .setHint("E.g. 90 hides anything sent 90+ days ago");
 
   section
     .addWidget(daysInput)
+    .addWidget(staleDaysInput)
     .addWidget(excludeToggle)
-    .addWidget(
-      CardService.newTextParagraph().setText(digestStatus),
-    )
-    .addWidget(
-      CardService.newButtonSet()
-        .addButton(dailyDigestButton)
-        .addButton(disableDigestButton),
-    )
-    .addWidget(
-      CardService.newButtonSet().addButton(saveButton),
-    );
+    .addWidget(autoLabelInput)
+    .addWidget(excludedDomainsInput);
 
   return section;
 }
@@ -124,16 +161,14 @@ function buildResultsSection(
   emails: PendingEmail[],
   days: number,
 ): GoogleAppsScript.Card_Service.CardSection {
-  const section = CardService.newCardSection().setHeader(
-    `Emails needing follow-up`,
-  );
+  const section = CardService.newCardSection();
 
   if (emails.length === 0) {
     section.addWidget(
       CardService.newTextParagraph().setText(
-        `🎉 You're all caught up! No sent emails older than ${days} day${
+        `You're all caught up!<br>No sent emails older than ${days} day${
           days !== 1 ? "s" : ""
-        } are waiting for a reply.`,
+        } are waiting for a reply`,
       ),
     );
 
@@ -144,25 +179,30 @@ function buildResultsSection(
     const age = getDayAge(email.date);
     const label = age === 1 ? "1 day ago" : `${age} days ago`;
 
+    const openLink = CardService.newOpenLink()
+      .setUrl(`https://mail.google.com/mail/#inbox/${email.threadId}`)
+      .setOpenAs(CardService.OpenAs.FULL_SIZE);
+
     const widget = CardService.newDecoratedText()
-      .setText(truncate(email.subject, 45))
-      .setBottomLabel(`To: ${email.to} · ${label}`)
+      .setTopLabel(truncate(email.to, 64))
+      .setText(truncate(email.subject, 28))
+      .setBottomLabel(label)
       .setWrapText(true)
-      .setOnClickAction(
-        CardService.newAction()
-          .setFunctionName("onOpenThread")
-          .setParameters({ threadId: email.threadId }),
-      );
+      .setButton(
+        CardService.newTextButton()
+          .setText("Open")
+          .setOpenLink(openLink),
+      )
+      .setOpenLink(openLink);
 
     section.addWidget(widget);
+    section.addWidget(CardService.newDivider());
   });
 
   if (emails.length > 15) {
     section.addWidget(
       CardService.newTextParagraph().setText(
-        `… and ${
-          emails.length - 15
-        } more. Check your daily digest for the full list.`,
+        `… and ${emails.length - 15} more`,
       ),
     );
   }
@@ -172,12 +212,22 @@ function buildResultsSection(
 
 // ── Action Handlers ──────────────────────────────────────────
 
-function onSaveSettings(
+function _onSaveSettings(
   e: ActionEvent,
 ): GoogleAppsScript.Card_Service.ActionResponse {
   const days = parseInt(e.formInput["followup_days"]) || DEFAULT_DAYS;
   const clamped = Math.max(1, Math.min(365, days));
   PROPS.setProperty("followup_days", clamped.toString());
+
+  PROPS.setProperty(
+    "excluded_domains",
+    (e.formInput["excluded_domains"] || "").trim(),
+  );
+  PROPS.setProperty("auto_label", (e.formInput["auto_label"] || "").trim());
+
+  const staleDays = parseInt(e.formInput["stale_days"]) || DEFAULT_STALE_DAYS;
+  PROPS.setProperty("stale_days", Math.max(1, staleDays).toString());
+
   return CardService.newActionResponseBuilder()
     .setNavigation(
       CardService.newNavigation().updateCard(buildHomepage(e)),
@@ -190,44 +240,26 @@ function onSaveSettings(
     .build();
 }
 
-function onToggleExcludeReplied(e: ActionEvent): void {
+function _onToggleExcludeReplied(e: ActionEvent): void {
   const val = e.formInput["exclude_replied"] === "true" ? "true" : "false";
   PROPS.setProperty("exclude_replied", val);
 }
 
-function onOpenThread(
-  e: ActionEvent,
+function _openSettingsCard(
+  _e: ActionEvent,
 ): GoogleAppsScript.Card_Service.ActionResponse {
-  const threadId = e.parameters["threadId"];
-  const url = `https://mail.google.com/mail/#inbox/${threadId}`;
-  return CardService.newActionResponseBuilder()
-    .setOpenLink(CardService.newOpenLink().setUrl(url))
+  const navigation = CardService.newNavigation().pushCard(buildSettingsCard());
+
+  return CardService.newActionResponseBuilder().setNavigation(navigation)
     .build();
 }
 
-function onEnableDailyDigest(
-  e: ActionEvent,
+function _onBack(
+  _e: ActionEvent,
 ): GoogleAppsScript.Card_Service.ActionResponse {
-  enableDailyDigest();
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepage(e)))
-    .setNotification(
-      CardService.newNotification().setText(
-        "Daily digest enabled — runs at 8 AM",
-      ),
-    )
-    .build();
-}
+  const navigation = CardService.newNavigation().popCard();
 
-function onDisableDailyDigest(
-  e: ActionEvent,
-): GoogleAppsScript.Card_Service.ActionResponse {
-  disableDailyDigest();
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepage(e)))
-    .setNotification(
-      CardService.newNotification().setText("Daily digest disabled"),
-    )
+  return CardService.newActionResponseBuilder().setNavigation(navigation)
     .build();
 }
 
@@ -239,15 +271,24 @@ function onDisableDailyDigest(
 function getPendingFollowUps(
   days: number,
   excludeReplied: boolean,
+  excludedDomains: string = "",
+  autoLabel: string = "",
+  staleDays: number = DEFAULT_STALE_DAYS,
 ): PendingEmail[] {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
-  // Search sent mail older than cutoff
-  const query = `in:sent before:${formatDateForQuery(cutoff)}`;
+  const staleCutoff = new Date();
+  staleCutoff.setDate(staleCutoff.getDate() - staleDays);
+
+  // Search sent mail within the active window (not too recent, not too old)
+  const query = `in:sent after:${formatDateForQuery(staleCutoff)} before:${
+    formatDateForQuery(cutoff)
+  }`;
   const threads = GmailApp.search(query, 0, 100);
 
   const results: PendingEmail[] = [];
+  const threadMap = new Map<string, GoogleAppsScript.Gmail.GmailThread>();
 
   threads.forEach((thread) => {
     if (excludeReplied && threadHasReply(thread)) return;
@@ -260,25 +301,53 @@ function getPendingFollowUps(
     const lastSent = sentMessages[sentMessages.length - 1];
     const sentDate = lastSent.getDate();
 
-    // Only include if the last sent message (not a reply to their reply) is old enough
-    if (sentDate > cutoff) return;
+    // Only include if the last sent message falls within the active window
+    if (sentDate > cutoff || sentDate <= staleCutoff) return;
 
+    const threadId = thread.getId();
     results.push({
-      threadId: thread.getId(),
+      threadId,
       subject: thread.getFirstMessageSubject() || "(no subject)",
       to: lastSent.getTo().split(",")[0].trim(),
       date: sentDate,
     });
+    threadMap.set(threadId, thread);
   });
 
   // Sort oldest first
   results.sort((a, b) => a.date.getTime() - b.date.getTime());
-  return results;
+
+  // Filter out excluded domains
+  const domainList = excludedDomains
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+  const filtered = domainList.length > 0
+    ? results.filter((r) => {
+      const toDomain = getEmailDomain(r.to);
+      return !domainList.some(
+        (d) => toDomain === d || toDomain.endsWith(`.${d}`),
+      );
+    })
+    : results;
+
+  // Apply auto-label to matching threads
+  if (autoLabel) {
+    let label = GmailApp.getUserLabelByName(autoLabel);
+    if (!label) label = GmailApp.createLabel(autoLabel);
+    filtered.forEach((r) => {
+      const thread = threadMap.get(r.threadId);
+      if (thread) thread.addLabel(label!);
+    });
+  }
+
+  return filtered;
 }
 
 function threadHasReply(thread: GoogleAppsScript.Gmail.GmailThread): boolean {
   const messages = thread.getMessages();
   const myEmail = Session.getActiveUser().getEmail();
+
   // Check if any message was NOT sent by me (i.e., a reply from recipient)
   return messages.some((m) => {
     const from = m.getFrom();
@@ -291,94 +360,12 @@ function isSentByMe(message: GoogleAppsScript.Gmail.GmailMessage): boolean {
   return message.getFrom().includes(myEmail);
 }
 
-// ── Daily Digest ─────────────────────────────────────────────
-
-function sendDailyDigest(): void {
-  const days = parseInt(
-    PROPS.getProperty("followup_days") || String(DEFAULT_DAYS),
-  );
-  const excludeReplied = PROPS.getProperty("exclude_replied") !== "false";
-  const emails = getPendingFollowUps(days, excludeReplied);
-
-  if (emails.length === 0) return; // Don't send if nothing to follow up on
-
-  const userEmail = Session.getActiveUser().getEmail();
-
-  const htmlRows = emails.map((e) => {
-    const age = getDayAge(e.date);
-    const url = `https://mail.google.com/mail/#all/${e.threadId}`;
-    return `
-      <tr style="border-bottom:1px solid #eee">
-        <td style="padding:10px 8px">
-          <a href="${url}" style="color:#1a73e8;text-decoration:none;font-weight:500">${
-      escapeHtml(e.subject)
-    }</a>
-        </td>
-        <td style="padding:10px 8px;color:#555;white-space:nowrap">${
-      escapeHtml(e.to)
-    }</td>
-        <td style="padding:10px 8px;color:#d93025;white-space:nowrap;font-weight:500">${age}d ago</td>
-      </tr>`;
-  }).join("");
-
-  const html = `
-    <html><body style="font-family:sans-serif;color:#202124;max-width:600px;margin:0 auto">
-      <h2 style="color:#1a73e8">📬 Follow-Up Reminder</h2>
-      <p>You have <strong>${emails.length}</strong> email${
-    emails.length !== 1 ? "s" : ""
-  } sent more than <strong>${days} day${
-    days !== 1 ? "s" : ""
-  }</strong> ago that may need a follow-up:</p>
-      <table style="width:100%;border-collapse:collapse;font-size:14px">
-        <thead>
-          <tr style="background:#f1f3f4;text-align:left">
-            <th style="padding:10px 8px">Subject</th>
-            <th style="padding:10px 8px">To</th>
-            <th style="padding:10px 8px">Age</th>
-          </tr>
-        </thead>
-        <tbody>${htmlRows}</tbody>
-      </table>
-      <p style="margin-top:24px;font-size:12px;color:#777">
-        Sent by your Gmail Follow-Up Add-on ·
-        <a href="https://mail.google.com/mail/#sent" style="color:#777">View Sent Mail</a>
-      </p>
-    </body></html>`;
-
-  GmailApp.sendEmail(
-    userEmail,
-    `📬 ${emails.length} follow-up${emails.length !== 1 ? "s" : ""} needed`,
-    "",
-    {
-      htmlBody: html,
-      name: "Follow-Up Reminder",
-    },
-  );
-}
-
-// ── Trigger Management ───────────────────────────────────────
-
-function enableDailyDigest(): void {
-  disableDailyDigest(); // Remove any existing
-  ScriptApp.newTrigger("sendDailyDigest")
-    .timeBased()
-    .everyDays(1)
-    .atHour(8)
-    .create();
-}
-
-function disableDailyDigest(): void {
-  ScriptApp.getProjectTriggers()
-    .filter((t) => t.getHandlerFunction() === "sendDailyDigest")
-    .forEach((t) => ScriptApp.deleteTrigger(t));
-}
-
-function hasDailyTrigger(): boolean {
-  return ScriptApp.getProjectTriggers()
-    .some((t) => t.getHandlerFunction() === "sendDailyDigest");
-}
-
 // ── Utilities ────────────────────────────────────────────────
+
+function getEmailDomain(emailStr: string): string {
+  const match = emailStr.match(/@([^>@\s]+)/);
+  return match ? match[1].toLowerCase() : "";
+}
 
 function formatDateForQuery(date: Date): string {
   const y = date.getFullYear();
@@ -393,8 +380,4 @@ function getDayAge(date: GoogleAppsScript.Base.Date): number {
 
 function truncate(str: string, max: number): string {
   return str.length > max ? str.slice(0, max - 1) + "…" : str;
-}
-
-function escapeHtml(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
