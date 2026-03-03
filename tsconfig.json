@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "lib": ["esnext"],
+    "outDir": "build",
+    "rootDir": "src",
+    "types": ["google-apps-script"],
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "strict": true
+  },
+  "include": ["src/**/*.ts"]
+}
