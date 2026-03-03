@@ -313,6 +313,7 @@ function getPendingFollowUps(
   if (hit) {
     const parsed: Array<Omit<PendingEmail, "date"> & { dateMs: number }> = JSON
       .parse(hit);
+
     return parsed.map((e) => ({ ...e, date: new Date(e.dateMs) }));
   }
 
@@ -345,9 +346,10 @@ function getPendingFollowUps(
     let lastSent: GoogleAppsScript.Gmail.GmailMessage | null = null;
     let hasReply = false;
 
-    for (const m of messages) {
-      if (m.getFrom().includes(myEmail)) {
-        lastSent = m; // keep updating — last one wins
+    for (const message of messages) {
+      if (message.getFrom().includes(myEmail)) {
+        lastSent = message;
+        hasReply = false;
       } else {
         hasReply = true;
       }
