@@ -19,10 +19,6 @@ interface ActionEvent {
 
 // ── Entry Points ─────────────────────────────────────────────
 
-function _buildAddOn(e: ActionEvent): GoogleAppsScript.Card_Service.Card {
-  return buildHomepage(e);
-}
-
 function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
   const days = parseInt(
     PROPS.getProperty("followup_days") || String(DEFAULT_DAYS),
@@ -68,7 +64,7 @@ function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
   return card.build();
 }
 
-function buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
+function _buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
   const days = parseInt(
     PROPS.getProperty("followup_days") || String(DEFAULT_DAYS),
   );
@@ -124,10 +120,7 @@ function buildSettingsSection(
       CardService.newSwitch()
         .setFieldName("exclude_replied")
         .setValue("true")
-        .setSelected(excludeReplied)
-        .setOnChangeAction(
-          CardService.newAction().setFunctionName("_onToggleExcludeReplied"),
-        ),
+        .setSelected(excludeReplied),
     );
 
   const autoLabelInput = CardService.newTextInput()
@@ -197,7 +190,7 @@ function buildResultsSection(
     const label = age === 1 ? "1 day ago" : `${age} days ago`;
 
     const openLink = CardService.newOpenLink()
-      .setUrl(`https://mail.google.com/mail/#inbox/${email.threadId}`)
+      .setUrl(`https://mail.google.com/mail/#all/${email.threadId}`)
       .setOpenAs(CardService.OpenAs.FULL_SIZE);
 
     const widget = CardService.newDecoratedText()
@@ -245,9 +238,14 @@ function _onSaveSettings(
   const staleDays = parseInt(e.formInput["stale_days"]) || DEFAULT_STALE_DAYS;
   PROPS.setProperty("stale_days", Math.max(1, staleDays).toString());
 
+  const exclude_replied = e.formInput["exclude_replied"] === "true"
+    ? "true"
+    : "false";
+  PROPS.setProperty("exclude_replied", exclude_replied);
+
   return CardService.newActionResponseBuilder()
     .setNavigation(
-      CardService.newNavigation().updateCard(buildHomepage(e)),
+      CardService.newNavigation().updateCard(_buildHomepage(e)),
     )
     .setNotification(
       CardService.newNotification().setText(
@@ -257,11 +255,6 @@ function _onSaveSettings(
     .build();
 }
 
-function _onToggleExcludeReplied(e: ActionEvent): void {
-  const val = e.formInput["exclude_replied"] === "true" ? "true" : "false";
-  PROPS.setProperty("exclude_replied", val);
-}
-
 function _onToggleSort(
   e: ActionEvent,
 ): GoogleAppsScript.Card_Service.ActionResponse {
@@ -269,7 +262,7 @@ function _onToggleSort(
   PROPS.setProperty("sort_order", current ? "desc" : "asc");
 
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepage(e)))
+    .setNavigation(CardService.newNavigation().updateCard(_buildHomepage(e)))
     .build();
 }
 

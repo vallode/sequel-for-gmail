@@ -20,7 +20,7 @@
     },
     "gmail": {
       "homepageTrigger": {
-        "runFunction": "_buildAddOn",
+        "runFunction": "_buildHomepage",
         "enabled": true
       }
     }
