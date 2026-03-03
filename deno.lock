@@ -3,8 +3,8 @@
   "specifiers": {
     "npm:@google/clasp@*": "3.2.0_typescript@5.9.3_zod@3.25.76_picomatch@4.0.3",
     "npm:@google/clasp@^3.2.0": "3.2.0_typescript@5.9.3_zod@3.25.76_picomatch@4.0.3",
-    "npm:@types/google-apps-script@*": "1.0.100",
-    "npm:@types/google-apps-script@1": "1.0.100",
+    "npm:@types/google-apps-script@*": "2.0.8",
+    "npm:@types/google-apps-script@^2.0.8": "2.0.8",
     "npm:typescript@*": "5.9.3",
     "npm:typescript@5": "5.9.3"
   },
@@ -283,8 +283,8 @@
         "zod-to-json-schema"
       ]
     },
-    "@types/google-apps-script@1.0.100": {
-      "integrity": "sha512-POgcjcDbrjYJYf3Av6j5n+z9/z/WulCNh9Gj199HgrcgRLzcQLg5ALw6jdWcgBkzgTLNYZSe7/01aOfiNzzn9g=="
+    "@types/google-apps-script@2.0.8": {
+      "integrity": "sha512-mGPmzzdgBu1DlwrjOhFQ8u0se6AF/z4OpaTzOGwNKxwXZjE7J+IssfE3oL24j/S/p6aFiSTIptHZvbyqeZD8vA=="
     },
     "@types/mute-stream@0.0.1": {
       "integrity": "sha512-0yQLzYhCqGz7CQPE3iDmYjhb7KMBFOP+tBkyw+/Y2YyDI5wpS7itXXxneN1zSsUwWx3Ji6YiVYrhAnpQGS/vkw==",
@@ -1474,7 +1474,7 @@
     "dependencies": [
       "npm:@google/clasp@^3.2.0",
       "npm:@types/google-apps-script@*",
-      "npm:@types/google-apps-script@1",
+      "npm:@types/google-apps-script@^2.0.8",
       "npm:typescript@5"
     ]
   }

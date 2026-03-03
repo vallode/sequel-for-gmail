@@ -86,6 +86,7 @@ function buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
     autoLabel,
     staleDays,
   );
+  const sortAsc = PROPS.getProperty("sort_order") !== "desc";
 
   const card = CardService.newCardBuilder().addCardAction(
     CardService.newCardAction().setText("Settings").setOnClickAction(
@@ -94,7 +95,7 @@ function buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
   );
 
   // Results section
-  card.addSection(buildResultsSection(emails, days));
+  card.addSection(buildResultsSection(emails, days, sortAsc));
 
   return card.build();
 }
@@ -160,6 +161,7 @@ function buildSettingsSection(
 function buildResultsSection(
   emails: PendingEmail[],
   days: number,
+  sortAsc: boolean,
 ): GoogleAppsScript.Card_Service.CardSection {
   const section = CardService.newCardSection();
 
@@ -175,7 +177,22 @@ function buildResultsSection(
     return section;
   }
 
-  emails.slice(0, 15).forEach((email) => {
+  const sortButton = CardService.newTextButton()
+    .setText(sortAsc ? "Oldest first" : "Newest first")
+    // @ts-ignore This does not show up in the type definitions but it is a valid method
+    .setMaterialIcon(
+      CardService.newMaterialIcon().setName(
+        sortAsc ? "arrow_upward" : "arrow_downward",
+      ),
+    )
+    .setOnClickAction(
+      CardService.newAction().setFunctionName("_onToggleSort"),
+    );
+  section.addWidget(CardService.newButtonSet().addButton(sortButton));
+
+  const sorted = sortAsc ? emails : [...emails].reverse();
+
+  sorted.slice(0, 15).forEach((email) => {
     const age = getDayAge(email.date);
     const label = age === 1 ? "1 day ago" : `${age} days ago`;
 
@@ -245,6 +262,17 @@ function _onToggleExcludeReplied(e: ActionEvent): void {
   PROPS.setProperty("exclude_replied", val);
 }
 
+function _onToggleSort(
+  e: ActionEvent,
+): GoogleAppsScript.Card_Service.ActionResponse {
+  const current = PROPS.getProperty("sort_order") !== "desc";
+  PROPS.setProperty("sort_order", current ? "desc" : "asc");
+
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepage(e)))
+    .build();
+}
+
 function _openSettingsCard(
   _e: ActionEvent,
 ): GoogleAppsScript.Card_Service.ActionResponse {
@@ -267,6 +295,7 @@ function _onBack(
 
 /**
  * Returns sent emails older than `days` days that haven't received a reply.
+ * Results are cached for 5 minutes to avoid repeated Gmail API calls.
  */
 function getPendingFollowUps(
   days: number,
@@ -275,6 +304,18 @@ function getPendingFollowUps(
   autoLabel: string = "",
   staleDays: number = DEFAULT_STALE_DAYS,
 ): PendingEmail[] {
+  const cache = CacheService.getUserCache();
+  const cacheKey =
+    `fu_${days}_${excludeReplied}_${staleDays}_${excludedDomains}_${autoLabel}`;
+
+  const hit = cache.get(cacheKey);
+
+  if (hit) {
+    const parsed: Array<Omit<PendingEmail, "date"> & { dateMs: number }> = JSON
+      .parse(hit);
+    return parsed.map((e) => ({ ...e, date: new Date(e.dateMs) }));
+  }
+
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
@@ -287,80 +328,94 @@ function getPendingFollowUps(
   }`;
   const threads = GmailApp.search(query, 0, 100);
 
+  const myEmail = getMyEmail();
+
+  // Pre-process domain list once outside the loop
+  const domainList = excludedDomains
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+
   const results: PendingEmail[] = [];
   const threadMap = new Map<string, GoogleAppsScript.Gmail.GmailThread>();
 
   threads.forEach((thread) => {
-    if (excludeReplied && threadHasReply(thread)) return;
-
     const messages = thread.getMessages();
-    // Find the last sent message in this thread
-    const sentMessages = messages.filter((m) => isSentByMe(m));
-    if (sentMessages.length === 0) return;
 
-    const lastSent = sentMessages[sentMessages.length - 1];
+    let lastSent: GoogleAppsScript.Gmail.GmailMessage | null = null;
+    let hasReply = false;
+
+    for (const m of messages) {
+      if (m.getFrom().includes(myEmail)) {
+        lastSent = m; // keep updating — last one wins
+      } else {
+        hasReply = true;
+      }
+    }
+
+    if (!lastSent) return;
+    if (excludeReplied && hasReply) return;
+
     const sentDate = lastSent.getDate();
-
-    // Only include if the last sent message falls within the active window
     if (sentDate > cutoff || sentDate <= staleCutoff) return;
+
+    const to = lastSent.getTo().split(",")[0].trim();
+
+    if (domainList.length > 0) {
+      const toDomain = getEmailDomain(to);
+      if (
+        domainList.some((d) => toDomain === d || toDomain.endsWith(`.${d}`))
+      ) {
+        return;
+      }
+    }
 
     const threadId = thread.getId();
     results.push({
       threadId,
       subject: thread.getFirstMessageSubject() || "(no subject)",
-      to: lastSent.getTo().split(",")[0].trim(),
+      to,
       date: sentDate,
     });
-    threadMap.set(threadId, thread);
+
+    if (autoLabel) threadMap.set(threadId, thread);
   });
 
-  // Sort oldest first
   results.sort((a, b) => a.date.getTime() - b.date.getTime());
 
-  // Filter out excluded domains
-  const domainList = excludedDomains
-    .split(",")
-    .map((d) => d.trim().toLowerCase())
-    .filter(Boolean);
-  const filtered = domainList.length > 0
-    ? results.filter((r) => {
-      const toDomain = getEmailDomain(r.to);
-      return !domainList.some(
-        (d) => toDomain === d || toDomain.endsWith(`.${d}`),
-      );
-    })
-    : results;
-
-  // Apply auto-label to matching threads
   if (autoLabel) {
     let label = GmailApp.getUserLabelByName(autoLabel);
     if (!label) label = GmailApp.createLabel(autoLabel);
-    filtered.forEach((r) => {
+
+    results.forEach((r) => {
       const thread = threadMap.get(r.threadId);
       if (thread) thread.addLabel(label!);
     });
   }
 
-  return filtered;
-}
+  try {
+    const toCache = results.map((r) => ({ ...r, dateMs: r.date.getTime() }));
+    cache.put(cacheKey, JSON.stringify(toCache), 300);
+  } catch (_) {
+    // Ignore — cache write failures are non-fatal
+  }
 
-function threadHasReply(thread: GoogleAppsScript.Gmail.GmailThread): boolean {
-  const messages = thread.getMessages();
-  const myEmail = Session.getActiveUser().getEmail();
-
-  // Check if any message was NOT sent by me (i.e., a reply from recipient)
-  return messages.some((m) => {
-    const from = m.getFrom();
-    return !from.includes(myEmail);
-  });
-}
-
-function isSentByMe(message: GoogleAppsScript.Gmail.GmailMessage): boolean {
-  const myEmail = Session.getActiveUser().getEmail();
-  return message.getFrom().includes(myEmail);
+  return results;
 }
 
 // ── Utilities ────────────────────────────────────────────────
+
+function getMyEmail(): string {
+  const cache = CacheService.getUserCache();
+  const cached = cache.get("my_email");
+
+  if (cached) return cached;
+
+  const email = Session.getActiveUser().getEmail();
+  cache.put("my_email", email, 3_600);
+
+  return email;
+}
 
 function getEmailDomain(emailStr: string): string {
   const match = emailStr.match(/@([^>@\s]+)/);
