@@ -4,6 +4,7 @@ const DEFAULT_DAYS = 3;
 const DEFAULT_AUTO_LABEL = "";
 const DEFAULT_EXCLUDED_DOMAINS = "";
 const DEFAULT_STALE_DAYS = 90;
+const DEFAULT_EXCLUDE_INTERNAL = false;
 
 interface PendingEmail {
   threadId: string;
@@ -30,6 +31,7 @@ function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
   const staleDays = parseInt(
     PROPS.getProperty("stale_days") || String(DEFAULT_STALE_DAYS),
   );
+  const excludeInternal = PROPS.getProperty("exclude_internal") === "true";
 
   const card = CardService.newCardBuilder().setHeader(
     CardService.newCardHeader().setTitle("Settings"),
@@ -44,7 +46,7 @@ function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
 
   const backButton = CardService.newTextButton().setText("Go Back")
     .setOnClickAction(CardService.newAction().setFunctionName("_onBack"))
-    .setTextButtonStyle(CardService.TextButtonStyle.TEXT);
+    .setTextButtonStyle(CardService.TextButtonStyle.OUTLINED);
 
   card.addSection(
     buildSettingsSection(
@@ -53,6 +55,7 @@ function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
       autoLabel,
       excludedDomains,
       staleDays,
+      excludeInternal,
     ),
   );
 
@@ -75,12 +78,14 @@ function _buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
   const staleDays = parseInt(
     PROPS.getProperty("stale_days") || String(DEFAULT_STALE_DAYS),
   );
+  const excludeInternal = PROPS.getProperty("exclude_internal") === "true";
   const emails = getPendingFollowUps(
     days,
     excludeReplied,
     excludedDomains,
     autoLabel,
     staleDays,
+    excludeInternal,
   );
   const sortAsc = PROPS.getProperty("sort_order") !== "desc";
 
@@ -104,6 +109,7 @@ function buildSettingsSection(
   autoLabel: string,
   excludedDomains: string,
   staleDays: number,
+  excludeInternal: boolean,
 ): GoogleAppsScript.Card_Service.CardSection {
   const section = CardService.newCardSection();
 
@@ -121,6 +127,20 @@ function buildSettingsSection(
         .setFieldName("exclude_replied")
         .setValue("true")
         .setSelected(excludeReplied),
+    );
+
+  const excludeInternalToggle = CardService.newDecoratedText()
+    .setText("Exclude self-sent & internal")
+    .setBottomLabel(
+      `Skip emails sent to yourself or your own domain (${
+        getEmailDomain(getMyEmail())
+      })`,
+    )
+    .setSwitchControl(
+      CardService.newSwitch()
+        .setFieldName("exclude_internal")
+        .setValue("true")
+        .setSelected(excludeInternal),
     );
 
   const autoLabelInput = CardService.newTextInput()
@@ -144,7 +164,10 @@ function buildSettingsSection(
   section
     .addWidget(daysInput)
     .addWidget(staleDaysInput)
+    .addWidget(CardService.newDivider())
     .addWidget(excludeToggle)
+    .addWidget(excludeInternalToggle)
+    .addWidget(CardService.newDivider())
     .addWidget(autoLabelInput)
     .addWidget(excludedDomainsInput);
 
@@ -170,8 +193,16 @@ function buildResultsSection(
     return section;
   }
 
+  const textButton = CardService.newTextButton()
+    .setText(`${emails.length} thread${emails.length !== 1 ? "s" : ""}`)
+    .setTextButtonStyle(CardService.TextButtonStyle.BORDERLESS)
+    .setDisabled(true)
+    .setOnClickAction(
+      CardService.newAction().setFunctionName("_onToggleSort"),
+    );
   const sortButton = CardService.newTextButton()
     .setText(sortAsc ? "Oldest first" : "Newest first")
+    .setTextButtonStyle(CardService.TextButtonStyle.FILLED_TONAL)
     // @ts-ignore This does not show up in the type definitions but it is a valid method
     .setMaterialIcon(
       CardService.newMaterialIcon().setName(
@@ -181,7 +212,9 @@ function buildResultsSection(
     .setOnClickAction(
       CardService.newAction().setFunctionName("_onToggleSort"),
     );
-  section.addWidget(CardService.newButtonSet().addButton(sortButton));
+  section.addWidget(
+    CardService.newButtonSet().addButton(textButton).addButton(sortButton),
+  );
 
   const sorted = sortAsc ? emails : [...emails].reverse();
 
@@ -195,13 +228,14 @@ function buildResultsSection(
 
     const widget = CardService.newDecoratedText()
       .setTopLabel(truncate(email.to, 64))
-      .setText(truncate(email.subject, 28))
+      .setText(truncate(email.subject, 24))
       .setBottomLabel(label)
       .setWrapText(true)
       .setButton(
         CardService.newTextButton()
           .setText("Open")
-          .setOpenLink(openLink),
+          .setOpenLink(openLink)
+          .setTextButtonStyle(CardService.TextButtonStyle.BORDERLESS),
       )
       .setOpenLink(openLink);
 
@@ -238,10 +272,14 @@ function _onSaveSettings(
   const staleDays = parseInt(e.formInput["stale_days"]) || DEFAULT_STALE_DAYS;
   PROPS.setProperty("stale_days", Math.max(1, staleDays).toString());
 
-  const exclude_replied = e.formInput["exclude_replied"] === "true"
-    ? "true"
-    : "false";
-  PROPS.setProperty("exclude_replied", exclude_replied);
+  PROPS.setProperty(
+    "exclude_replied",
+    e.formInput["exclude_replied"] === "true" ? "true" : "false",
+  );
+  PROPS.setProperty(
+    "exclude_internal",
+    e.formInput["exclude_internal"] === "true" ? "true" : "false",
+  );
 
   return CardService.newActionResponseBuilder()
     .setNavigation(
@@ -296,10 +334,11 @@ function getPendingFollowUps(
   excludedDomains: string = "",
   autoLabel: string = "",
   staleDays: number = DEFAULT_STALE_DAYS,
+  excludeInternal: boolean = DEFAULT_EXCLUDE_INTERNAL,
 ): PendingEmail[] {
   const cache = CacheService.getUserCache();
   const cacheKey =
-    `fu_${days}_${excludeReplied}_${staleDays}_${excludedDomains}_${autoLabel}`;
+    `fu_${days}_${excludeReplied}_${staleDays}_${excludedDomains}_${autoLabel}_${excludeInternal}`;
 
   const hit = cache.get(cacheKey);
 
@@ -323,6 +362,7 @@ function getPendingFollowUps(
   const threads = GmailApp.search(query, 0, 100);
 
   const myEmail = getMyEmail();
+  const myDomain = getEmailDomain(myEmail);
 
   // Pre-process domain list once outside the loop
   const domainList = excludedDomains
@@ -356,8 +396,11 @@ function getPendingFollowUps(
 
     const to = lastSent.getTo().split(",")[0].trim();
 
+    const toDomain = getEmailDomain(to);
+
+    if (excludeInternal && (to === myEmail || toDomain === myDomain)) return;
+
     if (domainList.length > 0) {
-      const toDomain = getEmailDomain(to);
       if (
         domainList.some((d) => toDomain === d || toDomain.endsWith(`.${d}`))
       ) {
