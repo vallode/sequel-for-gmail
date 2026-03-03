@@ -291,7 +291,7 @@ function _onSaveSettings(
     )
     .setNotification(
       CardService.newNotification().setText(
-        `Settings saved: ${clamped}-day follow-up window`,
+        `Settings saved`,
       ),
     )
     .build();
@@ -366,13 +366,13 @@ function getPendingFollowUps(
     formatDateForQuery(cutoff)
   }`;
   const t1 = Date.now();
+  // TODO: Implement paginated calls for resuilts over 100
   const threads = GmailApp.search(query, 0, 100);
   perf(`GmailApp.search (${threads.length} threads)`, t1);
 
   const myEmail = getMyEmail();
   const myDomain = getEmailDomain(myEmail);
 
-  // Pre-process domain list once outside the loop
   const domainList = excludedDomains
     .split(",")
     .map((d) => d.trim().toLowerCase())
@@ -422,7 +422,7 @@ function getPendingFollowUps(
     const threadId = thread.getId();
     results.push({
       threadId,
-      subject: thread.getFirstMessageSubject() || "(no subject)",
+      subject: messages[0].getSubject() || "(no subject)",
       to,
       date: sentDate,
     });
