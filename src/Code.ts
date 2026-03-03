@@ -68,6 +68,7 @@ function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
 }
 
 function _buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
+  const t0 = Date.now();
   const days = parseInt(
     PROPS.getProperty("followup_days") || String(DEFAULT_DAYS),
   );
@@ -98,7 +99,10 @@ function _buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
   // Results section
   card.addSection(buildResultsSection(emails, days, sortAsc));
 
-  return card.build();
+  const result = card.build();
+  perf("_buildHomepage", t0);
+
+  return result;
 }
 
 // ── Card Sections ─────────────────────────────────────────────
@@ -336,6 +340,8 @@ function getPendingFollowUps(
   staleDays: number = DEFAULT_STALE_DAYS,
   excludeInternal: boolean = DEFAULT_EXCLUDE_INTERNAL,
 ): PendingEmail[] {
+  const t0 = Date.now();
+
   const cache = CacheService.getUserCache();
   const cacheKey =
     `fu_${days}_${excludeReplied}_${staleDays}_${excludedDomains}_${autoLabel}_${excludeInternal}`;
@@ -345,7 +351,7 @@ function getPendingFollowUps(
   if (hit) {
     const parsed: Array<Omit<PendingEmail, "date"> & { dateMs: number }> = JSON
       .parse(hit);
-
+    perf("getPendingFollowUps (cache hit)", t0);
     return parsed.map((e) => ({ ...e, date: new Date(e.dateMs) }));
   }
 
@@ -359,7 +365,9 @@ function getPendingFollowUps(
   const query = `in:sent after:${formatDateForQuery(staleCutoff)} before:${
     formatDateForQuery(cutoff)
   }`;
+  const t1 = Date.now();
   const threads = GmailApp.search(query, 0, 100);
+  perf(`GmailApp.search (${threads.length} threads)`, t1);
 
   const myEmail = getMyEmail();
   const myDomain = getEmailDomain(myEmail);
@@ -373,19 +381,22 @@ function getPendingFollowUps(
   const results: PendingEmail[] = [];
   const threadMap = new Map<string, GoogleAppsScript.Gmail.GmailThread>();
 
-  threads.forEach((thread) => {
-    const messages = thread.getMessages();
+  const t2 = Date.now();
+  const allMessages = GmailApp.getMessagesForThreads(threads);
+  perf(`GmailApp.getMessagesForThreads (${threads.length} threads)`, t2);
+
+  threads.forEach((thread, i) => {
+    const messages = allMessages[i];
 
     let lastSent: GoogleAppsScript.Gmail.GmailMessage | null = null;
     let hasReply = false;
+    const lastMessage = messages[messages.length - 1];
 
-    for (const message of messages) {
-      if (message.getFrom().includes(myEmail)) {
-        lastSent = message;
-        hasReply = false;
-      } else {
-        hasReply = true;
-      }
+    if (lastMessage.getFrom().includes(myEmail)) {
+      lastSent = lastMessage;
+      hasReply = false;
+    } else {
+      hasReply = true;
     }
 
     if (!lastSent) return;
@@ -438,6 +449,8 @@ function getPendingFollowUps(
     // Ignore — cache write failures are non-fatal
   }
 
+  perf(`getPendingFollowUps (${results.length}/${threads.length} threads)`, t0);
+
   return results;
 }
 
@@ -457,6 +470,7 @@ function getMyEmail(): string {
 
 function getEmailDomain(emailStr: string): string {
   const match = emailStr.match(/@([^>@\s]+)/);
+
   return match ? match[1].toLowerCase() : "";
 }
 
@@ -464,6 +478,7 @@ function formatDateForQuery(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
+
   return `${y}/${m}/${d}`;
 }
 
@@ -473,4 +488,8 @@ function getDayAge(date: GoogleAppsScript.Base.Date): number {
 
 function truncate(str: string, max: number): string {
   return str.length > max ? str.slice(0, max - 1) + "…" : str;
+}
+
+function perf(label: string, startMs: number): void {
+  console.log(`[sequel] ${label}: ${Date.now() - startMs}ms`);
 }

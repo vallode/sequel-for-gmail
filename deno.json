@@ -13,7 +13,7 @@
   },
   "compilerOptions": {
     "types": ["npm:@types/google-apps-script"],
-    "lib": ["ES2019"],
+    "lib": ["ES2019", "dom"],
     "strict": true
   }
 }
