@@ -15,7 +15,7 @@
       "name": "Follow-Up Reminders",
       "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/reply_all_black_48dp.png",
       "layoutProperties": {
-        "primaryColor": "#ffffff"
+        "primaryColor": "#c2e7ff"
       }
     },
     "gmail": {
