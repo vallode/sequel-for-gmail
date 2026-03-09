@@ -220,6 +220,7 @@ function buildResultsSection(
     CardService.newButtonSet().addButton(textButton).addButton(sortButton),
   );
 
+  // TODO: Pagination
   const sorted = sortAsc ? emails : [...emails].reverse();
 
   sorted.slice(0, 15).forEach((email) => {
