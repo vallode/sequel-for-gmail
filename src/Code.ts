@@ -6,6 +6,15 @@ const DEFAULT_EXCLUDED_DOMAINS = "";
 const DEFAULT_STALE_DAYS = 90;
 const DEFAULT_EXCLUDE_INTERNAL = false;
 
+interface UserSettings {
+  days: number;
+  excludeReplied: boolean;
+  autoLabel: string;
+  excludedDomains: string;
+  staleDays: number;
+  excludeInternal: boolean;
+}
+
 interface PendingEmail {
   threadId: string;
   subject: string;
@@ -16,6 +25,13 @@ interface PendingEmail {
 interface ActionEvent {
   formInput: Record<string, string>;
   parameters: Record<string, string>;
+}
+
+interface DismissedEmail {
+  threadId: string;
+  subject: string;
+  to: string;
+  dateMs: number;
 }
 
 // ── Entry Points ─────────────────────────────────────────────
@@ -67,19 +83,20 @@ function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
   return card.build();
 }
 
-function _buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
+function _buildHomepage(
+  _e: ActionEvent,
+  ignoreCache: boolean = false,
+): GoogleAppsScript.Card_Service.Card {
   const t0 = Date.now();
-  const days = parseInt(
-    PROPS.getProperty("followup_days") || String(DEFAULT_DAYS),
-  );
-  const excludeReplied = PROPS.getProperty("exclude_replied") !== "false";
-  const autoLabel = PROPS.getProperty("auto_label") || DEFAULT_AUTO_LABEL;
-  const excludedDomains = PROPS.getProperty("excluded_domains") ||
-    DEFAULT_EXCLUDED_DOMAINS;
-  const staleDays = parseInt(
-    PROPS.getProperty("stale_days") || String(DEFAULT_STALE_DAYS),
-  );
-  const excludeInternal = PROPS.getProperty("exclude_internal") === "true";
+  const {
+    days,
+    excludeReplied,
+    autoLabel,
+    excludedDomains,
+    staleDays,
+    excludeInternal,
+  } = getUserSettings();
+
   const emails = getPendingFollowUps(
     days,
     excludeReplied,
@@ -87,17 +104,28 @@ function _buildHomepage(_e: ActionEvent): GoogleAppsScript.Card_Service.Card {
     autoLabel,
     staleDays,
     excludeInternal,
+    ignoreCache,
   );
   const sortAsc = PROPS.getProperty("sort_order") !== "desc";
 
+  const dismissedIds = new Set(
+    (JSON.parse(PROPS.getProperty("dismissed_ids") || "[]") as DismissedEmail[])
+      .map((d) => d.threadId),
+  );
+  const visibleEmails = emails.filter((e) => !dismissedIds.has(e.threadId));
+
   const card = CardService.newCardBuilder().addCardAction(
+    CardService.newCardAction().setText("Dismissed").setOnClickAction(
+      CardService.newAction().setFunctionName("_openDismissedCard"),
+    ),
+  ).addCardAction(
     CardService.newCardAction().setText("Settings").setOnClickAction(
       CardService.newAction().setFunctionName("_openSettingsCard"),
     ),
   );
 
   // Results section
-  card.addSection(buildResultsSection(emails, days, sortAsc));
+  card.addSection(buildResultsSection(visibleEmails, days, sortAsc));
 
   const result = card.build();
   perf("_buildHomepage", t0);
@@ -223,9 +251,13 @@ function buildResultsSection(
   // TODO: Pagination
   const sorted = sortAsc ? emails : [...emails].reverse();
 
-  sorted.slice(0, 15).forEach((email) => {
+  sorted.slice(0, 15).forEach((email, index) => {
     const age = getDayAge(email.date);
-    const label = age === 1 ? "1 day ago" : `${age} days ago`;
+    const label = age === 0
+      ? "Today"
+      : age === 1
+      ? "1 day ago"
+      : `${age} days ago`;
 
     const openLink = CardService.newOpenLink()
       .setUrl(`https://mail.google.com/mail/#all/${email.threadId}`)
@@ -238,14 +270,30 @@ function buildResultsSection(
       .setWrapText(true)
       .setButton(
         CardService.newTextButton()
-          .setText("Open")
-          .setOpenLink(openLink)
+          .setAltText("Dismiss this reminder")
+          // @ts-ignore This does not show up in the type definitions but it is a valid method
+          .setMaterialIcon(
+            CardService.newMaterialIcon().setName("close"),
+          )
+          .setOnClickAction(
+            CardService.newAction()
+              .setFunctionName("_onDismissEmail")
+              .setParameters({
+                threadId: email.threadId,
+                subject: email.subject,
+                to: email.to,
+                dateMs: String(email.date.getTime()),
+              }),
+          )
           .setTextButtonStyle(CardService.TextButtonStyle.BORDERLESS),
       )
       .setOpenLink(openLink);
 
     section.addWidget(widget);
-    section.addWidget(CardService.newDivider());
+
+    if (index !== 15) {
+      section.addWidget(CardService.newDivider());
+    }
   });
 
   if (emails.length > 15) {
@@ -257,6 +305,69 @@ function buildResultsSection(
   }
 
   return section;
+}
+
+function buildDismissedCard(): GoogleAppsScript.Card_Service.Card {
+  const dismissed: DismissedEmail[] = JSON.parse(
+    PROPS.getProperty("dismissed_ids") || "[]",
+  );
+  const card = CardService.newCardBuilder().setHeader(
+    CardService.newCardHeader().setTitle("Dismissed Emails"),
+  );
+
+  const section = CardService.newCardSection();
+
+  if (dismissed.length === 0) {
+    section.addWidget(
+      CardService.newTextParagraph().setText("No dismissed emails."),
+    );
+  } else {
+    [...dismissed].reverse().forEach((entry) => {
+      const age = Math.floor((Date.now() - entry.dateMs) / 86400000);
+      const ageLabel = age === 1 ? "1 day ago" : `${age} days ago`;
+
+      const widget = CardService.newDecoratedText()
+        .setTopLabel(truncate(entry.to, 64))
+        .setText(truncate(entry.subject, 24))
+        .setBottomLabel(ageLabel)
+        .setWrapText(true)
+        .setButton(
+          CardService.newTextButton()
+            .setText("Restore")
+            .setAltText("Restore this email")
+            .setOnClickAction(
+              CardService.newAction()
+                .setFunctionName("_onRestoreEmail")
+                .setParameters({ threadId: entry.threadId }),
+            )
+            .setTextButtonStyle(CardService.TextButtonStyle.BORDERLESS),
+        );
+
+      section.addWidget(widget);
+      section.addWidget(CardService.newDivider());
+    });
+  }
+
+  card.addSection(section);
+
+  const restoreAllButton = CardService.newTextButton()
+    .setText("Restore All")
+    .setOnClickAction(
+      CardService.newAction().setFunctionName("_onClearDismissed"),
+    )
+    .setTextButtonStyle(CardService.TextButtonStyle.FILLED);
+
+  const backButton = CardService.newTextButton()
+    .setText("Go Back")
+    .setOnClickAction(CardService.newAction().setFunctionName("_onBackFromDismissed"))
+    .setTextButtonStyle(CardService.TextButtonStyle.OUTLINED);
+
+  card.setFixedFooter(
+    CardService.newFixedFooter().setPrimaryButton(restoreAllButton)
+      .setSecondaryButton(backButton),
+  );
+
+  return card.build();
 }
 
 // ── Action Handlers ──────────────────────────────────────────
@@ -321,9 +432,76 @@ function _openSettingsCard(
 function _onBack(
   _e: ActionEvent,
 ): GoogleAppsScript.Card_Service.ActionResponse {
-  const navigation = CardService.newNavigation().popCard();
+  return CardService.newActionResponseBuilder().setNavigation(
+    CardService.newNavigation().popCard(),
+  ).build();
+}
+
+function _onBackFromDismissed(
+  e: ActionEvent,
+): GoogleAppsScript.Card_Service.ActionResponse {
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(_buildHomepage(e)))
+    .setStateChanged(true)
+    .build();
+}
+
+function _onDismissEmail(
+  e: ActionEvent,
+): GoogleAppsScript.Card_Service.ActionResponse {
+  const { threadId, subject, to, dateMs } = e.parameters;
+  const dismissed: DismissedEmail[] = JSON.parse(
+    PROPS.getProperty("dismissed_ids") || "[]",
+  );
+
+  if (!dismissed.some((d) => d.threadId === threadId)) {
+    dismissed.push({ threadId, subject, to, dateMs: Number(dateMs) });
+    PROPS.setProperty("dismissed_ids", JSON.stringify(dismissed));
+  }
+
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().updateCard(_buildHomepage(e)),
+    )
+    .setNotification(CardService.newNotification().setText("Email dismissed"))
+    .build();
+}
+
+function _openDismissedCard(
+  _e: ActionEvent,
+): GoogleAppsScript.Card_Service.ActionResponse {
+  const navigation = CardService.newNavigation().updateCard(buildDismissedCard());
 
   return CardService.newActionResponseBuilder().setNavigation(navigation)
+    .build();
+}
+
+function _onRestoreEmail(
+  e: ActionEvent,
+): GoogleAppsScript.Card_Service.ActionResponse {
+  const { threadId } = e.parameters;
+  const dismissed: DismissedEmail[] = JSON.parse(
+    PROPS.getProperty("dismissed_ids") || "[]",
+  );
+  const remaining = dismissed.filter((d) => d.threadId !== threadId);
+  PROPS.setProperty("dismissed_ids", JSON.stringify(remaining));
+
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildDismissedCard()))
+    .setNotification(CardService.newNotification().setText("Email restored"))
+    .build();
+}
+
+function _onClearDismissed(
+  _e: ActionEvent,
+): GoogleAppsScript.Card_Service.ActionResponse {
+  PROPS.deleteProperty("dismissed_ids");
+
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildDismissedCard()))
+    .setNotification(
+      CardService.newNotification().setText("All dismissed emails cleared"),
+    )
     .build();
 }
 
@@ -340,6 +518,7 @@ function getPendingFollowUps(
   autoLabel: string = "",
   staleDays: number = DEFAULT_STALE_DAYS,
   excludeInternal: boolean = DEFAULT_EXCLUDE_INTERNAL,
+  ignoreCache?: boolean,
 ): PendingEmail[] {
   const t0 = Date.now();
 
@@ -347,13 +526,16 @@ function getPendingFollowUps(
   const cacheKey =
     `fu_${days}_${excludeReplied}_${staleDays}_${excludedDomains}_${autoLabel}_${excludeInternal}`;
 
-  const hit = cache.get(cacheKey);
+  if (!ignoreCache) {
+    const hit = cache.get(cacheKey);
 
-  if (hit) {
-    const parsed: Array<Omit<PendingEmail, "date"> & { dateMs: number }> = JSON
-      .parse(hit);
-    perf("getPendingFollowUps (cache hit)", t0);
-    return parsed.map((e) => ({ ...e, date: new Date(e.dateMs) }));
+    if (hit) {
+      const parsed: Array<Omit<PendingEmail, "date"> & { dateMs: number }> =
+        JSON
+          .parse(hit);
+      perf("getPendingFollowUps (cache hit)", t0);
+      return parsed.map((e) => ({ ...e, date: new Date(e.dateMs) }));
+    }
   }
 
   const cutoff = new Date();
@@ -456,6 +638,29 @@ function getPendingFollowUps(
 }
 
 // ── Utilities ────────────────────────────────────────────────
+
+function getUserSettings(): UserSettings {
+  const days = parseInt(
+    PROPS.getProperty("followup_days") || String(DEFAULT_DAYS),
+  );
+  const excludeReplied = PROPS.getProperty("exclude_replied") !== "false";
+  const autoLabel = PROPS.getProperty("auto_label") || DEFAULT_AUTO_LABEL;
+  const excludedDomains = PROPS.getProperty("excluded_domains") ||
+    DEFAULT_EXCLUDED_DOMAINS;
+  const staleDays = parseInt(
+    PROPS.getProperty("stale_days") || String(DEFAULT_STALE_DAYS),
+  );
+  const excludeInternal = PROPS.getProperty("exclude_internal") === "true";
+
+  return {
+    days,
+    excludeReplied,
+    autoLabel,
+    excludedDomains,
+    staleDays,
+    excludeInternal,
+  };
+}
 
 function getMyEmail(): string {
   const cache = CacheService.getUserCache();

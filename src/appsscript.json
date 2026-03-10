@@ -13,7 +13,7 @@
   "addOns": {
     "common": {
       "name": "Follow-Up Reminders",
-      "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/reply_all_black_48dp.png",
+      "logoUrl": "https://cdn-icons-png.flaticon.com/512/3388/3388657.png",
       "layoutProperties": {
         "primaryColor": "#c2e7ff"
       }

@@ -2,7 +2,7 @@
   "nodeModulesDir": "auto",
   "tasks": {
     "build": "mkdir -p build && cp src/appsscript.json build/ && deno run -A npm:typescript/bin/tsc",
-    "deploy": "deno task build &&  deno run -A npm:@google/clasp deploy",
+    "deploy": "deno task build && deno task push && deno run -A npm:@google/clasp deploy",
     "push": "deno task build && deno run -A npm:@google/clasp push",
     "pull": "deno run -A npm:@google/clasp pull",
     "open": "deno run -A npm:@google/clasp open"
