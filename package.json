@@ -1,0 +1,34 @@
+{
+  "name": "sequel-for-gmail",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "node --experimental-strip-types --test tests/**/*.test.ts",
+    "check": "biome check . && pnpm typecheck && pnpm test && pnpm build",
+    "push": "pnpm build && clasp push",
+    "pull": "clasp pull",
+    "open": "clasp open",
+    "deploy": "pnpm build && clasp push && clasp deploy"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@google/clasp": "^3.2.0",
+    "@types/google-apps-script": "^2.0.8",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}
