@@ -18,14 +18,14 @@
     "https://www.googleapis.com/auth/script.scriptapp",
     "https://www.googleapis.com/auth/script.external_request"
   ],
+  "urlFetchWhitelist": ["https://gmail.googleapis.com/"],
   "addOns": {
     "common": {
       "name": "Follow-Up Reminders",
       "logoUrl": "https://raw.githubusercontent.com/vallode/sequel-for-gmail/main/assets/logo.png",
       "layoutProperties": {
         "primaryColor": "#c2e7ff"
-      },
-      "urlFetchWhitelist": ["https://gmail.googleapis.com/"]
+      }
     },
     "gmail": {
       "homepageTrigger": {
