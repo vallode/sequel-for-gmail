@@ -61,6 +61,8 @@ export interface FollowUpQueryResult {
   threadsScanned: number;
   searchTruncated: boolean;
   fetchedAt: Date;
+  /** Set when the list could not be loaded; never cached */
+  error?: string;
 }
 
 export interface AutoFollowUpStep {

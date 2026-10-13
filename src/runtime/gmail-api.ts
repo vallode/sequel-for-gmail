@@ -6,6 +6,7 @@ import {
 import { type PaginatedSearchResult, paginateTokenSearch } from "../follow-ups-core.ts";
 import {
   buildThreadMetadataUrl,
+  describeHttpError,
   type GmailApiThread,
   isRetryableStatus,
   parseThreadMetadata,
@@ -22,11 +23,12 @@ function gmailApi(): GoogleAppsScript.Gmail {
 
 export function searchThreadIds(query: string): PaginatedSearchResult<string> {
   return paginateTokenSearch((pageToken, maxResults) => {
-    const res = gmailApi().Users.Threads.list("me", {
+    const args: { q: string; maxResults: number; pageToken?: string } = {
       q: query,
       maxResults,
-      pageToken,
-    });
+    };
+    if (pageToken) args.pageToken = pageToken;
+    const res = gmailApi().Users.Threads.list("me", args);
     return {
       items: (res.threads ?? []).map((t) => t.id).filter((id): id is string => !!id),
       nextPageToken: res.nextPageToken,
@@ -38,12 +40,14 @@ export interface ThreadMetadataResult {
   threads: ThreadMetadata[];
   /** Threads that still failed after one retry */
   failed: number;
+  /** First failure description, for logs and the error card */
+  firstError?: string;
 }
 
 function fetchBatch(
   ids: string[],
   token: string,
-): { threads: ThreadMetadata[]; retry: string[]; failed: number } {
+): ThreadMetadataResult & { retry: string[] } {
   const responses = UrlFetchApp.fetchAll(
     ids.map((id) => ({
       url: buildThreadMetadataUrl(id),
@@ -55,6 +59,7 @@ function fetchBatch(
   const threads: ThreadMetadata[] = [];
   const retry: string[] = [];
   let failed = 0;
+  let firstError: string | undefined;
   responses.forEach((res, i) => {
     const status = res.getResponseCode();
     if (status === 200) {
@@ -67,11 +72,14 @@ function fetchBatch(
       retry.push(ids[i]);
     } else {
       // 404 means the thread was deleted between search and fetch
-      if (status !== 404) console.log(`[sequel] threads.get ${status} for ${ids[i]}`);
+      if (status !== 404 && !firstError) {
+        firstError = describeHttpError(status, res.getContentText());
+        console.log(`[sequel] threads.get failed: ${firstError}`);
+      }
       failed++;
     }
   });
-  return { threads, retry, failed };
+  return { threads, retry, failed, firstError };
 }
 
 /**
@@ -84,12 +92,14 @@ export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
   const threads: ThreadMetadata[] = [];
   const retry: string[] = [];
   let failed = 0;
+  let firstError: string | undefined;
 
   for (const batch of chunk(threadIds, THREAD_FETCH_BATCH_SIZE)) {
     const result = fetchBatch(batch, token);
     threads.push(...result.threads);
     retry.push(...result.retry);
     failed += result.failed;
+    firstError ??= result.firstError;
   }
 
   if (retry.length > 0) {
@@ -99,10 +109,13 @@ export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
       const result = fetchBatch(batch, token);
       threads.push(...result.threads);
       failed += result.failed + result.retry.length;
+      firstError ??= result.firstError;
+      if (result.retry.length > 0)
+        firstError ??= "Gmail API rate limit or server error";
     }
   }
 
-  return { threads, failed };
+  return { threads, failed, firstError };
 }
 
 /** Labels messages in bulk; `labelName` must already exist. */

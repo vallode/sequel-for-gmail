@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { paginateTokenSearch, type TokenPage } from "../src/follow-ups-core.ts";
 import {
   buildThreadMetadataUrl,
+  describeHttpError,
   findHeader,
   isRetryableStatus,
   parseThreadMetadata,
@@ -126,5 +127,17 @@ describe("thread metadata", () => {
     assert.equal(isRetryableStatus(503), true);
     assert.equal(isRetryableStatus(404), false);
     assert.equal(isRetryableStatus(403), false);
+  });
+
+  it("describes Google API errors from the response body", () => {
+    const body = JSON.stringify({
+      error: { code: 403, message: "Gmail API has not been used" },
+    });
+    assert.equal(describeHttpError(403, body), "403: Gmail API has not been used");
+    assert.equal(describeHttpError(502, "<html>Bad gateway</html>"), "HTTP 502");
+    assert.ok(
+      describeHttpError(400, JSON.stringify({ error: { message: "x".repeat(500) } }))
+        .length <= 200,
+    );
   });
 });

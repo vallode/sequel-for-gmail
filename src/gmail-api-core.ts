@@ -66,3 +66,16 @@ export function parseThreadMetadata(raw: GmailApiThread): ThreadMetadata | null 
 export function isRetryableStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
+
+/** Short "status: message" from a Google API error body, for logs and the UI. */
+export function describeHttpError(status: number, body: string): string {
+  let message = "";
+  try {
+    message =
+      (JSON.parse(body) as { error?: { message?: string } }).error?.message ?? "";
+  } catch {
+    // Non-JSON body; fall back to the status alone
+  }
+  const text = message ? `${status}: ${message}` : `HTTP ${status}`;
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text;
+}

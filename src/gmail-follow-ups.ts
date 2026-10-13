@@ -121,10 +121,9 @@ export function getPendingFollowUps(
     threadIds = result.items;
     searchTruncated = result.truncated;
   } catch (err) {
-    console.log(
-      `[sequel] Gmail search failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
-    return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt };
+    const error = `Gmail search failed: ${err instanceof Error ? err.message : "unknown"}`;
+    console.log(`[sequel] ${error}`);
+    return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt, error };
   }
   perf(`Threads.list (${threadIds.length} threads)`, t1);
 
@@ -133,25 +132,37 @@ export function getPendingFollowUps(
   const domainList = parseExcludedDomainList(settings.excludedDomains);
 
   let scanned: ThreadMetadata[] = [];
+  let fetchFailed = 0;
   const t2 = Date.now();
   try {
     const result = fetchThreadMetadata(threadIds);
     scanned = result.threads;
-    // Threads that could not be fetched may still be pending; flag the list
-    // as incomplete so the UI says so and the waiting label is not pruned.
-    if (result.failed > 0) {
-      console.log(`[sequel] ${result.failed} threads could not be fetched`);
+    fetchFailed = result.failed;
+    if (fetchFailed > 0) {
+      console.log(`[sequel] ${fetchFailed} threads could not be fetched`);
+      // Nothing usable came back: report the error instead of an empty list
+      if (scanned.length === 0) {
+        return {
+          emails: [],
+          threadsScanned: threadIds.length,
+          searchTruncated,
+          fetchedAt,
+          error: `Could not load threads (${result.firstError ?? "unknown error"})`,
+        };
+      }
+      // Unfetched threads may still be pending; flag the list as incomplete
+      // so the UI says so and the waiting label is not pruned.
       searchTruncated = true;
     }
   } catch (err) {
-    console.log(
-      `[sequel] thread fetch failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    const error = `Could not load threads: ${err instanceof Error ? err.message : "unknown"}`;
+    console.log(`[sequel] ${error}`);
     return {
       emails: [],
       threadsScanned: threadIds.length,
       searchTruncated,
       fetchedAt,
+      error,
     };
   }
   perf(`threads.get metadata (${scanned.length} threads)`, t2);
@@ -177,7 +188,8 @@ export function getPendingFollowUps(
     );
   }
 
-  tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
+  // A partial fetch is worth showing but not caching; the next load retries it
+  if (fetchFailed === 0) tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
 
   perf(`getPendingFollowUps (${emails.length}/${threadIds.length} threads)`, t0);
 
