@@ -13,7 +13,7 @@ export function getMyEmail(): string {
     }
     return email;
   } catch (err) {
-    log.error("getActiveUser email failed", err);
+    log.error("getActiveUser email failed", { error: err });
     return "";
   }
 }

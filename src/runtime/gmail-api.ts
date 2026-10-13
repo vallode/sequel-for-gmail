@@ -75,7 +75,7 @@ function fetchRound(ids: string[], token: string): ThreadRound {
       // 404 means the thread was deleted between search and fetch
       if (status !== 404 && !round.firstError) {
         round.firstError = describeHttpError(status, body);
-        log.warn("threads.get failed", undefined, { threadId: id, status });
+        log.warn("threads.get failed", { threadId: id, status });
       }
       round.failed++;
     }
@@ -121,7 +121,7 @@ function fetchRound(ids: string[], token: string): ThreadRound {
     if (missing > 0) {
       round.failed += missing;
       round.firstError ??= "Gmail batch response was missing results";
-      log.warn("batch response missing parts", undefined, { missing });
+      log.warn("batch response missing parts", { missing });
     }
   });
 
@@ -142,7 +142,7 @@ export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
 
   for (const delayMs of THREAD_FETCH_RETRY_DELAYS_MS) {
     if (round.retry.length === 0) break;
-    log.warn("retrying threads.get requests", undefined, {
+    log.warn("retrying threads.get requests", {
       count: round.retry.length,
       statuses: round.retryStatuses,
       delayMs,

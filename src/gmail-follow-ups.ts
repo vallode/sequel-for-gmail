@@ -67,7 +67,7 @@ function tryWriteCache(
     if (payload.length > MAX_CACHE_VALUE_BYTES) return;
     CacheService.getUserCache().put(cacheKey, payload, CACHE_TTL_SECONDS);
   } catch (err) {
-    log.warn("cache write skipped", err);
+    log.warn("cache write skipped", { error: err });
   }
 }
 
@@ -95,7 +95,7 @@ export function getPendingFollowUps(
         }
       }
     } catch (err) {
-      log.warn("cache read skipped", err);
+      log.warn("cache read skipped", { error: err });
     }
   }
 
@@ -117,7 +117,7 @@ export function getPendingFollowUps(
     threadIds = result.items;
     searchTruncated = result.truncated;
   } catch (err) {
-    log.error("Gmail search failed", err);
+    log.error("Gmail search failed", { error: err });
     const error = `Gmail search failed: ${err instanceof Error ? err.message : "unknown"}`;
     return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt, error };
   }
@@ -135,7 +135,7 @@ export function getPendingFollowUps(
     scanned = result.threads;
     fetchFailed = result.failed;
     if (fetchFailed > 0) {
-      log.warn("some threads could not be fetched", undefined, {
+      log.warn("some threads could not be fetched", {
         failed: fetchFailed,
         firstError: result.firstError,
       });
@@ -154,7 +154,7 @@ export function getPendingFollowUps(
       searchTruncated = true;
     }
   } catch (err) {
-    log.error("thread metadata fetch failed", err);
+    log.error("thread metadata fetch failed", { error: err });
     const error = `Could not load threads: ${err instanceof Error ? err.message : "unknown"}`;
     return {
       emails: [],
@@ -183,7 +183,7 @@ export function getPendingFollowUps(
   try {
     perf("syncWaitingLabel", t3, syncWaitingLabel(scanned, emails, searchTruncated));
   } catch (err) {
-    log.error("waiting label sync failed", err);
+    log.error("waiting label sync failed", { error: err });
   }
 
   // A partial fetch is worth showing but not caching; the next load retries it
