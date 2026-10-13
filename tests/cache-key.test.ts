@@ -41,18 +41,24 @@ describe("cached follow-up payloads", () => {
     },
   ];
 
-  it("round-trips emails and the truncation flag", () => {
+  const fetchedAt = new Date("2026-10-12T09:30:00Z");
+
+  it("round-trips emails, the truncation flag, and the fetch time", () => {
     for (const searchTruncated of [true, false]) {
       const restored = parseCachedFollowUps(
-        serializeCachedFollowUps(emails, searchTruncated),
+        serializeCachedFollowUps(emails, searchTruncated, fetchedAt),
       );
-      assert.deepEqual(restored, { emails, searchTruncated });
+      assert.deepEqual(restored, { emails, searchTruncated, fetchedAt });
     }
   });
 
-  it("rejects malformed and legacy array payloads", () => {
+  it("rejects malformed and legacy payloads", () => {
     assert.equal(parseCachedFollowUps("not json"), null);
     assert.equal(parseCachedFollowUps("null"), null);
     assert.equal(parseCachedFollowUps("[]"), null);
+    assert.equal(
+      parseCachedFollowUps(JSON.stringify({ emails: [], searchTruncated: false })),
+      null,
+    );
   });
 });

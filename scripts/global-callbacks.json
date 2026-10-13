@@ -5,6 +5,7 @@
   "_onSaveSettings",
   "_onBack",
   "_onBackFromDismissed",
+  "_onRefresh",
   "_onToggleSort",
   "_openSettingsCard",
   "_openDismissedCard",

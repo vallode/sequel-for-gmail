@@ -31,7 +31,7 @@ Sequel is a Gmail add-on built on Google Apps Script (V8 runtime), written in Ty
 
 **UI:** Google Card Service API. Entry functions declared in `src/appsscript.json`: `_buildHomepage`, `buildSettingsCard`, `buildDismissedCard`.
 
-**State:** User settings via `PropertiesService.getUserProperties()`. Dismissed emails are stored as JSON under `dismissed_ids` (capped, lock-protected updates). Follow-up results cached ~5 minutes in `CacheService` with hashed keys; Save & Refresh bypasses cache.
+**State:** User settings via `PropertiesService.getUserProperties()`. Dismissed emails are stored as JSON under `dismissed_ids` (capped, lock-protected updates). Follow-up results cached ~30 minutes in `CacheService` with hashed keys; Save & Refresh and the homepage Refresh action bypass cache.
 
 **Core logic:** `getPendingFollowUps()` paginates Gmail sent-thread search (bounded), filters threads in `follow-ups-core.ts` (replies, domains, internal, stale window), and syncs the `Follow-ups/Waiting` label.
 

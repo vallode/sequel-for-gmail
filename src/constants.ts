@@ -9,7 +9,8 @@ export const MAX_FOLLOWUP_DAYS = 365;
 export const DISMISSED_CAP = 100;
 export const DISMISSED_PROPERTY_KEY = "dismissed_ids";
 
-export const CACHE_TTL_SECONDS = 300;
+/** Results change slowly; the homepage Refresh action bypasses the cache */
+export const CACHE_TTL_SECONDS = 1800;
 export const MAX_CACHE_VALUE_BYTES = 100_000;
 export const MAX_CACHE_KEY_LENGTH = 250;
 
@@ -19,6 +20,9 @@ export const GMAIL_SEARCH_PAGE_SIZE = 100;
 export const MAX_THREADS_TO_SCAN = 300;
 
 export const HOMEPAGE_DISPLAY_LIMIT = 15;
+
+/** GmailLabel.addToThreads / removeFromThreads accept at most 100 threads per call */
+export const LABEL_BATCH_SIZE = 100;
 
 export const SOURCE_REPO_URL = "https://github.com/vallode/sequel-for-gmail";
 
@@ -36,8 +40,6 @@ export const FOLLOWUP_LABELS = [
   FOLLOWUP_AUTO_LABEL,
   FOLLOWUP_DONE_LABEL,
 ] as const;
-/** GmailLabel.addToThreads / removeFromThreads accept at most 100 threads */
-export const LABEL_BATCH_SIZE = 100;
 export const AUTO_FOLLOWUP_STEPS_PROPERTY_KEY = "auto_followup_steps";
 /** Keeps the serialized sequence well under the 9KB UserProperties value limit */
 export const MAX_AUTO_FOLLOWUP_STEPS = 3;

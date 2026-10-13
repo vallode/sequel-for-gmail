@@ -61,6 +61,14 @@ export function _onSaveSettings(
     .build();
 }
 
+export function _onRefresh(
+  e: ActionEvent,
+): GoogleAppsScript.Card_Service.ActionResponse {
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(_buildHomepage(e, true)))
+    .build();
+}
+
 export function _onToggleSort(
   e: ActionEvent,
 ): GoogleAppsScript.Card_Service.ActionResponse {
