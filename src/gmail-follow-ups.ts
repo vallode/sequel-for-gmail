@@ -78,7 +78,7 @@ function tryWriteCache(
     if (payload.length > MAX_CACHE_VALUE_BYTES) return;
     CacheService.getUserCache().put(cacheKey, payload, CACHE_TTL_SECONDS);
   } catch (err) {
-    log.warn("cache write skipped", err);
+    log.warn("cache write skipped", { error: err });
   }
 }
 
@@ -106,7 +106,7 @@ export function getPendingFollowUps(
         }
       }
     } catch (err) {
-      log.warn("cache read skipped", err);
+      log.warn("cache read skipped", { error: err });
     }
   }
 
@@ -128,7 +128,7 @@ export function getPendingFollowUps(
     collected = result.items;
     searchTruncated = result.truncated;
   } catch (err) {
-    log.error("Gmail search failed", err);
+    log.error("Gmail search failed", { error: err });
     return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt };
   }
   perf("GmailApp.search", t1, { threads: collected.length });
@@ -143,7 +143,7 @@ export function getPendingFollowUps(
     const allMessages = GmailApp.getMessagesForThreads(collected);
     threadInputs = mapGmailThreads(collected, allMessages);
   } catch (err) {
-    log.error("getMessagesForThreads failed", err);
+    log.error("getMessagesForThreads failed", { error: err });
     return {
       emails: [],
       threadsScanned: collected.length,
@@ -166,7 +166,7 @@ export function getPendingFollowUps(
   try {
     syncWaitingLabel(collected, emails, searchTruncated);
   } catch (err) {
-    log.error("waiting label sync failed", err);
+    log.error("waiting label sync failed", { error: err });
   }
 
   tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);

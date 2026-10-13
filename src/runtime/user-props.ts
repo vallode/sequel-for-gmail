@@ -4,7 +4,6 @@ import {
   parseDismissedJson,
   removeDismissedEntry,
 } from "../dismissed-store.ts";
-import { log } from "../log.ts";
 import {
   parseSettingsFromProperties,
   SETTINGS_PROPERTY_KEYS,
@@ -29,12 +28,7 @@ export function writeUserSettings(
   settings: UserSettings,
   props: GoogleAppsScript.Properties.Properties = getUserPropertiesStore(),
 ): void {
-  try {
-    props.setProperties(settingsToPropertyWrites(settings));
-  } catch (err) {
-    log.error("settings write failed", err);
-    throw err;
-  }
+  props.setProperties(settingsToPropertyWrites(settings));
 }
 
 export function readDismissedList(
@@ -51,12 +45,7 @@ export function writeDismissedList(
   items: DismissedEmail[],
   props: GoogleAppsScript.Properties.Properties = getUserPropertiesStore(),
 ): void {
-  try {
-    props.setProperty(DISMISSED_PROPERTY_KEY, JSON.stringify(items));
-  } catch (err) {
-    log.error("dismissed write failed", err);
-    throw err;
-  }
+  props.setProperty(DISMISSED_PROPERTY_KEY, JSON.stringify(items));
 }
 
 export function withDismissedLock<T>(fn: () => T): T {

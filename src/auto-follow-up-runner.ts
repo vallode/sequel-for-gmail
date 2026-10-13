@@ -4,7 +4,7 @@ import {
   MAX_AUTO_FOLLOWUP_DRAFTS_PER_RUN,
 } from "./constants.ts";
 import { getEmailDomain, parseExcludedDomainList } from "./email-utils.ts";
-import { log, perf } from "./log.ts";
+import { log } from "./log.ts";
 import { ensureFollowUpLabels, listLabelThreads } from "./runtime/labels.ts";
 import { getMyEmail } from "./runtime/session-email.ts";
 import { readUserSettings } from "./runtime/user-props.ts";
@@ -105,7 +105,6 @@ function createFollowUpDraft(
  * that got a reply or finished their sequence. Never sends mail.
  */
 export function runAutoFollowUps(now: Date = new Date()): AutoFollowUpRunSummary {
-  const t0 = Date.now();
   const summary: AutoFollowUpRunSummary = {
     scanned: 0,
     drafted: 0,
@@ -183,13 +182,11 @@ export function runAutoFollowUps(now: Date = new Date()): AutoFollowUpRunSummary
         }
       } catch (err) {
         summary.failed++;
-        log.error("auto follow-up failed on thread", err, { threadId });
+        log.error("auto follow-up failed on thread", { threadId, error: err });
       }
     });
   } finally {
     lock.releaseLock();
   }
-
-  perf("runAutoFollowUps", t0, { ...summary });
   return summary;
 }

@@ -24,8 +24,8 @@ describe("buildLogEntry", () => {
     });
   });
 
-  it("attaches a serialized error when given", () => {
-    const entry = buildLogEntry("failed", {}, new Error("x"));
+  it("serializes the error field", () => {
+    const entry = buildLogEntry("failed", { error: new Error("x") });
     assert.equal((entry.error as { message: string }).message, "x");
   });
 
@@ -38,7 +38,7 @@ describe("log", () => {
   it("routes levels to matching console methods", (t) => {
     const error = t.mock.method(console, "error", () => {});
     const warn = t.mock.method(console, "warn", () => {});
-    log.error("bad", new Error("e"));
+    log.error("bad", { error: new Error("e") });
     log.warn("meh");
     assert.equal(error.mock.callCount(), 1);
     assert.equal(warn.mock.callCount(), 1);

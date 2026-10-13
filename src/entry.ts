@@ -44,7 +44,7 @@ export function _onSaveSettings(
     syncAutoFollowUpTrigger(settings.autoFollowUpEnabled);
   } catch (err) {
     scheduled = false;
-    log.error("trigger sync failed", err);
+    log.error("trigger sync failed", { error: err });
   }
 
   return CardService.newActionResponseBuilder()
@@ -125,7 +125,7 @@ export function _onDismissEmail(
     try {
       dismissEmailEntry(entry);
     } catch (err) {
-      log.error("dismiss failed", err, { threadId: entry.threadId });
+      log.error("dismiss failed", { threadId: entry.threadId, error: err });
     }
   }
 
@@ -155,7 +155,7 @@ export function _onRestoreEmail(
     try {
       restoreDismissedThread(threadId);
     } catch (err) {
-      log.error("restore failed", err, { threadId });
+      log.error("restore failed", { threadId, error: err });
     }
   }
 
@@ -175,7 +175,7 @@ export function _onClearDismissed(
   try {
     clearDismissedList();
   } catch (err) {
-    log.error("clear dismissed failed", err);
+    log.error("clear dismissed failed", { error: err });
   }
 
   return CardService.newActionResponseBuilder()
@@ -197,7 +197,7 @@ export function _onToggleAutoFollowUp(
       setThreadAutoFollowUp(threadId, enable);
       ok = true;
     } catch (err) {
-      log.error("auto follow-up toggle failed", err, { threadId, enable });
+      log.error("auto follow-up toggle failed", { threadId, enable, error: err });
     }
   }
 
@@ -215,14 +215,11 @@ export function _onToggleAutoFollowUp(
 
 /** Time-driven trigger handler installed by `syncAutoFollowUpTrigger`. */
 export function _runAutoFollowUps(): void {
+  const t0 = Date.now();
   try {
     const summary = runAutoFollowUps();
-    if (summary.skipped) {
-      log.info("auto follow-up skipped", { reason: summary.skipped });
-    } else {
-      log.info("auto follow-up run complete", { ...summary });
-    }
+    log.info("auto follow-up run", { ...summary, durationMs: Date.now() - t0 });
   } catch (err) {
-    log.error("auto follow-up run failed", err);
+    log.error("auto follow-up run failed", { error: err });
   }
 }
