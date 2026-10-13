@@ -1,3 +1,4 @@
+import { buildCatSection } from "./cat.ts";
 import { HOMEPAGE_DISPLAY_LIMIT, SOURCE_REPO_URL } from "./constants.ts";
 import { getDayAge } from "./dates.ts";
 import { dismissedThreadIds } from "./dismissed-store.ts";
@@ -248,6 +249,7 @@ export function buildHomepageCard(
   card.addSection(
     buildResultsSection(visibleEmails, settings.days, sortAsc, searchTruncated),
   );
+  card.addSection(buildCatSection());
 
   console.log(`[sequel] _buildHomepage: ${Date.now() - t0}ms`);
   return card.build();
