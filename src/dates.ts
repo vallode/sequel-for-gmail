@@ -14,3 +14,10 @@ export function buildSearchQuery(staleCutoff: Date, cutoff: Date): string {
     cutoff,
   )}`;
 }
+
+export function formatUpdatedLabel(fetchedAt: Date, now: Date = new Date()): string {
+  const minutes = Math.floor((now.getTime() - fetchedAt.getTime()) / 60000);
+  if (minutes < 1) return "Updated just now";
+  if (minutes === 1) return "Updated 1 min ago";
+  return `Updated ${minutes} min ago`;
+}

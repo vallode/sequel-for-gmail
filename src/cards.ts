@@ -1,5 +1,5 @@
 import { HOMEPAGE_DISPLAY_LIMIT, SOURCE_REPO_URL } from "./constants.ts";
-import { getDayAge } from "./dates.ts";
+import { formatUpdatedLabel, getDayAge } from "./dates.ts";
 import { dismissedThreadIds } from "./dismissed-store.ts";
 import { applySortOrder } from "./follow-ups-core.ts";
 import { getPendingFollowUps } from "./gmail-follow-ups.ts";
@@ -105,13 +105,30 @@ export function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
   return card.build();
 }
 
+function buildFreshnessWidget(
+  fetchedAt: Date,
+): GoogleAppsScript.Card_Service.DecoratedText {
+  return CardService.newDecoratedText()
+    .setText(formatUpdatedLabel(fetchedAt))
+    .setButton(
+      CardService.newTextButton()
+        .setText("Refresh")
+        .setAltText("Refresh follow-ups")
+        .setMaterialIcon(CardService.newMaterialIcon().setName("refresh"))
+        .setOnClickAction(CardService.newAction().setFunctionName("_onRefresh"))
+        .setTextButtonStyle(CardService.TextButtonStyle.BORDERLESS),
+    );
+}
+
 export function buildResultsSection(
   emails: PendingEmail[],
   days: number,
   sortAsc: boolean,
   searchTruncated: boolean,
+  fetchedAt: Date,
 ): GoogleAppsScript.Card_Service.CardSection {
   const section = CardService.newCardSection();
+  section.addWidget(buildFreshnessWidget(fetchedAt));
 
   if (emails.length === 0) {
     section.addWidget(
@@ -215,7 +232,10 @@ export function buildHomepageCard(
 ): GoogleAppsScript.Card_Service.Card {
   const t0 = Date.now();
   const settings = readUserSettings();
-  const { emails, searchTruncated } = getPendingFollowUps(settings, ignoreCache);
+  const { emails, searchTruncated, fetchedAt } = getPendingFollowUps(
+    settings,
+    ignoreCache,
+  );
   const sortAsc =
     PropertiesService.getUserProperties().getProperty("sort_order") !== "desc";
 
@@ -246,7 +266,13 @@ export function buildHomepageCard(
     );
 
   card.addSection(
-    buildResultsSection(visibleEmails, settings.days, sortAsc, searchTruncated),
+    buildResultsSection(
+      visibleEmails,
+      settings.days,
+      sortAsc,
+      searchTruncated,
+      fetchedAt,
+    ),
   );
 
   console.log(`[sequel] _buildHomepage: ${Date.now() - t0}ms`);
