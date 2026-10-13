@@ -4,6 +4,7 @@ import {
   MAX_AUTO_FOLLOWUP_DRAFTS_PER_RUN,
 } from "./constants.ts";
 import { getEmailDomain, parseExcludedDomainList } from "./email-utils.ts";
+import { log, perf } from "./log.ts";
 import { ensureFollowUpLabels, listLabelThreads } from "./runtime/labels.ts";
 import { getMyEmail } from "./runtime/session-email.ts";
 import { readUserSettings } from "./runtime/user-props.ts";
@@ -12,7 +13,6 @@ import type {
   AutoFollowUpMessageInput,
   AutoFollowUpOptions,
 } from "./types.ts";
-import { perf } from "./util.ts";
 
 export interface AutoFollowUpRunSummary {
   scanned: number;
@@ -21,10 +21,6 @@ export interface AutoFollowUpRunSummary {
   waiting: number;
   failed: number;
   skipped?: "disabled" | "no-steps" | "no-user-email" | "locked";
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "unknown";
 }
 
 /** Thread IDs currently flagged for auto follow-up. */
@@ -173,33 +169,27 @@ export function runAutoFollowUps(now: Date = new Date()): AutoFollowUpRunSummary
             decision,
           );
           summary.drafted++;
-          console.log(
-            `[sequel] auto follow-up: drafted step ${decision.stepIndex + 1} on ${threadId}`,
-          );
+          log.info("auto follow-up drafted", {
+            threadId,
+            step: decision.stepIndex + 1,
+          });
         } else if (decision.action === "stop") {
           thread.removeLabel(auto);
           thread.addLabel(done);
           summary.stopped++;
-          console.log(
-            `[sequel] auto follow-up: stopped ${threadId} (${decision.reason})`,
-          );
+          log.info("auto follow-up stopped", { threadId, reason: decision.reason });
         } else {
           summary.waiting++;
         }
       } catch (err) {
         summary.failed++;
-        console.log(
-          `[sequel] auto follow-up failed on ${threadId}: ${errorMessage(err)}`,
-        );
+        log.error("auto follow-up failed on thread", err, { threadId });
       }
     });
   } finally {
     lock.releaseLock();
   }
 
-  perf(
-    `runAutoFollowUps (${summary.drafted} drafted, ${summary.stopped} stopped, ${summary.waiting} waiting, ${summary.failed} failed)`,
-    t0,
-  );
+  perf("runAutoFollowUps", t0, { ...summary });
   return summary;
 }

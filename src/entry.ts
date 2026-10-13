@@ -5,6 +5,7 @@ import {
   syncAutoFollowUpTrigger,
 } from "./auto-follow-up-runner.ts";
 import { buildDismissedCard, buildHomepageCard, buildSettingsCard } from "./cards.ts";
+import { log } from "./log.ts";
 import {
   clearDismissedList,
   dismissEmailEntry,
@@ -21,6 +22,7 @@ export function _buildHomepage(
   return buildHomepageCard(e, ignoreCache);
 }
 
+export { withLogging } from "./log.ts";
 export { buildDismissedCard, buildSettingsCard };
 
 function saveSettingsNotice(enabled: boolean, hasSteps: boolean, ok: boolean): string {
@@ -42,9 +44,7 @@ export function _onSaveSettings(
     syncAutoFollowUpTrigger(settings.autoFollowUpEnabled);
   } catch (err) {
     scheduled = false;
-    console.log(
-      `[sequel] trigger sync failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("trigger sync failed", err);
   }
 
   return CardService.newActionResponseBuilder()
@@ -125,9 +125,7 @@ export function _onDismissEmail(
     try {
       dismissEmailEntry(entry);
     } catch (err) {
-      console.log(
-        `[sequel] dismiss failed: ${err instanceof Error ? err.message : "unknown"}`,
-      );
+      log.error("dismiss failed", err, { threadId: entry.threadId });
     }
   }
 
@@ -157,9 +155,7 @@ export function _onRestoreEmail(
     try {
       restoreDismissedThread(threadId);
     } catch (err) {
-      console.log(
-        `[sequel] restore failed: ${err instanceof Error ? err.message : "unknown"}`,
-      );
+      log.error("restore failed", err, { threadId });
     }
   }
 
@@ -179,9 +175,7 @@ export function _onClearDismissed(
   try {
     clearDismissedList();
   } catch (err) {
-    console.log(
-      `[sequel] clear dismissed failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("clear dismissed failed", err);
   }
 
   return CardService.newActionResponseBuilder()
@@ -203,9 +197,7 @@ export function _onToggleAutoFollowUp(
       setThreadAutoFollowUp(threadId, enable);
       ok = true;
     } catch (err) {
-      console.log(
-        `[sequel] auto follow-up toggle failed: ${err instanceof Error ? err.message : "unknown"}`,
-      );
+      log.error("auto follow-up toggle failed", err, { threadId, enable });
     }
   }
 
@@ -225,11 +217,12 @@ export function _onToggleAutoFollowUp(
 export function _runAutoFollowUps(): void {
   try {
     const summary = runAutoFollowUps();
-    if (summary.skipped)
-      console.log(`[sequel] auto follow-up skipped: ${summary.skipped}`);
+    if (summary.skipped) {
+      log.info("auto follow-up skipped", { reason: summary.skipped });
+    } else {
+      log.info("auto follow-up run complete", { ...summary });
+    }
   } catch (err) {
-    console.log(
-      `[sequel] auto follow-up run failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("auto follow-up run failed", err);
   }
 }

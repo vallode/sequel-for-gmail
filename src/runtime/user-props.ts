@@ -4,6 +4,7 @@ import {
   parseDismissedJson,
   removeDismissedEntry,
 } from "../dismissed-store.ts";
+import { log } from "../log.ts";
 import {
   parseSettingsFromProperties,
   SETTINGS_PROPERTY_KEYS,
@@ -31,9 +32,7 @@ export function writeUserSettings(
   try {
     props.setProperties(settingsToPropertyWrites(settings));
   } catch (err) {
-    console.log(
-      `[sequel] settings write failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("settings write failed", err);
     throw err;
   }
 }
@@ -55,9 +54,7 @@ export function writeDismissedList(
   try {
     props.setProperty(DISMISSED_PROPERTY_KEY, JSON.stringify(items));
   } catch (err) {
-    console.log(
-      `[sequel] dismissed write failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("dismissed write failed", err);
     throw err;
   }
 }

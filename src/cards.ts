@@ -9,6 +9,7 @@ import { formatUpdatedLabel, getDayAge } from "./dates.ts";
 import { dismissedThreadIds } from "./dismissed-store.ts";
 import { applySortOrder } from "./follow-ups-core.ts";
 import { getPendingFollowUps } from "./gmail-follow-ups.ts";
+import { log, perf } from "./log.ts";
 import { requireFullAuthorization } from "./runtime/authorization.ts";
 import { getMyDomain } from "./runtime/session-email.ts";
 import { readDismissedList, readUserSettings } from "./runtime/user-props.ts";
@@ -337,6 +338,7 @@ export function buildHomepageCard(
 ): GoogleAppsScript.Card_Service.Card {
   const t0 = Date.now();
   requireFullAuthorization();
+  perf("requireFullAuthorization", t0);
   const settings = readUserSettings();
   const { emails, searchTruncated, fetchedAt, error } = getPendingFollowUps(
     settings,
@@ -373,14 +375,14 @@ export function buildHomepageCard(
 
   let autoFollowUpThreadIds: Set<string> | null = null;
   if (settings.autoFollowUpEnabled) {
+    const ta = Date.now();
     try {
       autoFollowUpThreadIds = getAutoFollowUpThreadIds();
     } catch (err) {
-      console.log(
-        `[sequel] auto follow-up lookup failed: ${err instanceof Error ? err.message : "unknown"}`,
-      );
+      log.error("auto follow-up lookup failed", err);
       autoFollowUpThreadIds = new Set();
     }
+    perf("getAutoFollowUpThreadIds", ta, { threads: autoFollowUpThreadIds.size });
     card.addSection(
       buildAutoFollowUpStatusSection(settings, autoFollowUpThreadIds.size),
     );
@@ -399,7 +401,7 @@ export function buildHomepageCard(
   );
   card.addSection(buildCatSection());
 
-  console.log(`[sequel] _buildHomepage: ${Date.now() - t0}ms`);
+  perf("_buildHomepage", t0, { visible: visibleEmails.length });
   return card.build();
 }
 

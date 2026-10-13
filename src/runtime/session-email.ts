@@ -1,4 +1,5 @@
 import { getEmailDomain } from "../email-utils.ts";
+import { log } from "../log.ts";
 
 export function getMyEmail(): string {
   const cache = CacheService.getUserCache();
@@ -12,9 +13,7 @@ export function getMyEmail(): string {
     }
     return email;
   } catch (err) {
-    console.log(
-      `[sequel] getActiveUser email failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("getActiveUser email failed", err);
     return "";
   }
 }

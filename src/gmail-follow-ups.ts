@@ -13,6 +13,7 @@ import { parseExcludedDomainList } from "./email-utils.ts";
 import { filterThreadsToPending } from "./follow-ups-core.ts";
 import type { ThreadMetadata } from "./gmail-api-core.ts";
 import { diffLabelMembership } from "./labels-core.ts";
+import { log, perf } from "./log.ts";
 import {
   addLabelToMessages,
   fetchThreadMetadata,
@@ -25,7 +26,6 @@ import {
 } from "./runtime/labels.ts";
 import { getMyDomain, getMyEmail } from "./runtime/session-email.ts";
 import type { FollowUpQueryResult, PendingEmail, UserSettings } from "./types.ts";
-import { perf } from "./util.ts";
 
 /**
  * Keeps `Follow-ups/Waiting` equal to the current follow-up list: labels new
@@ -67,9 +67,7 @@ function tryWriteCache(
     if (payload.length > MAX_CACHE_VALUE_BYTES) return;
     CacheService.getUserCache().put(cacheKey, payload, CACHE_TTL_SECONDS);
   } catch (err) {
-    console.log(
-      `[sequel] cache write skipped: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.warn("cache write skipped", err);
   }
 }
 
@@ -87,7 +85,7 @@ export function getPendingFollowUps(
       if (hit) {
         const restored = parseCachedFollowUps(hit);
         if (restored) {
-          perf("getPendingFollowUps (cache hit)", t0);
+          perf("getPendingFollowUps", t0, { cacheHit: true });
           return {
             emails: restored.emails,
             threadsScanned: 0,
@@ -97,9 +95,7 @@ export function getPendingFollowUps(
         }
       }
     } catch (err) {
-      console.log(
-        `[sequel] cache read skipped: ${err instanceof Error ? err.message : "unknown"}`,
-      );
+      log.warn("cache read skipped", err);
     }
   }
 
@@ -121,11 +117,11 @@ export function getPendingFollowUps(
     threadIds = result.items;
     searchTruncated = result.truncated;
   } catch (err) {
+    log.error("Gmail search failed", err);
     const error = `Gmail search failed: ${err instanceof Error ? err.message : "unknown"}`;
-    console.log(`[sequel] ${error}`);
     return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt, error };
   }
-  perf(`Threads.list (${threadIds.length} threads)`, t1);
+  perf("Threads.list", t1, { threads: threadIds.length, searchTruncated });
 
   const myEmail = getMyEmail();
   const myDomain = getMyDomain();
@@ -139,7 +135,10 @@ export function getPendingFollowUps(
     scanned = result.threads;
     fetchFailed = result.failed;
     if (fetchFailed > 0) {
-      console.log(`[sequel] ${fetchFailed} threads could not be fetched`);
+      log.warn("some threads could not be fetched", undefined, {
+        failed: fetchFailed,
+        firstError: result.firstError,
+      });
       // Nothing usable came back: report the error instead of an empty list
       if (scanned.length === 0) {
         return {
@@ -155,8 +154,8 @@ export function getPendingFollowUps(
       searchTruncated = true;
     }
   } catch (err) {
+    log.error("thread metadata fetch failed", err);
     const error = `Could not load threads: ${err instanceof Error ? err.message : "unknown"}`;
-    console.log(`[sequel] ${error}`);
     return {
       emails: [],
       threadsScanned: threadIds.length,
@@ -165,7 +164,7 @@ export function getPendingFollowUps(
       error,
     };
   }
-  perf(`threads.get metadata (${scanned.length} threads)`, t2);
+  perf("threads.get metadata", t2, { threads: scanned.length, failed: fetchFailed });
 
   const emails = filterThreadsToPending(
     scanned.map((t) => t.thread),
@@ -180,18 +179,22 @@ export function getPendingFollowUps(
     },
   );
 
+  const t3 = Date.now();
   try {
     syncWaitingLabel(scanned, emails, searchTruncated);
   } catch (err) {
-    console.log(
-      `[sequel] waiting label sync failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("waiting label sync failed", err);
   }
+  perf("syncWaitingLabel", t3);
 
   // A partial fetch is worth showing but not caching; the next load retries it
   if (fetchFailed === 0) tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
 
-  perf(`getPendingFollowUps (${emails.length}/${threadIds.length} threads)`, t0);
+  perf("getPendingFollowUps", t0, {
+    pending: emails.length,
+    threads: threadIds.length,
+    searchTruncated,
+  });
 
   return {
     emails,

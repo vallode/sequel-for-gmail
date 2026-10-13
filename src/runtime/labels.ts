@@ -1,6 +1,7 @@
 import { FOLLOWUP_LABELS, LABEL_BATCH_SIZE } from "../constants.ts";
 import { paginateSearch } from "../follow-ups-core.ts";
 import { missingLabelNames } from "../labels-core.ts";
+import { log } from "../log.ts";
 import { chunk } from "../util.ts";
 
 export interface FollowUpLabels {
@@ -37,7 +38,8 @@ export function listLabelThreads(
   const { items, truncated } = paginateSearch((start, max) =>
     label.getThreads(start, max),
   );
-  if (truncated) console.log(`[sequel] ${label.getName()}: label threads truncated`);
+  if (truncated)
+    log.warn("label threads truncated", undefined, { label: label.getName() });
   return items.filter((thread) => !thread.isInTrash());
 }
 

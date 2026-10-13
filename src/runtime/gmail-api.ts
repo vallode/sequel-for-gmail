@@ -12,6 +12,7 @@ import {
   parseThreadMetadata,
   type ThreadMetadata,
 } from "../gmail-api-core.ts";
+import { log, perf } from "../log.ts";
 import { chunk } from "../util.ts";
 
 function gmailApi(): GoogleAppsScript.Gmail {
@@ -74,7 +75,7 @@ function fetchBatch(
       // 404 means the thread was deleted between search and fetch
       if (status !== 404 && !firstError) {
         firstError = describeHttpError(status, res.getContentText());
-        console.log(`[sequel] threads.get failed: ${firstError}`);
+        log.warn("threads.get failed", undefined, { threadId: ids[i], status });
       }
       failed++;
     }
@@ -95,7 +96,9 @@ export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
   let firstError: string | undefined;
 
   for (const batch of chunk(threadIds, THREAD_FETCH_BATCH_SIZE)) {
+    const tb = Date.now();
     const result = fetchBatch(batch, token);
+    perf("threads.get batch", tb, { size: batch.length, retry: result.retry.length });
     threads.push(...result.threads);
     retry.push(...result.retry);
     failed += result.failed;
@@ -103,7 +106,7 @@ export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
   }
 
   if (retry.length > 0) {
-    console.log(`[sequel] retrying ${retry.length} threads.get requests`);
+    log.warn("retrying threads.get requests", undefined, { count: retry.length });
     Utilities.sleep(THREAD_FETCH_RETRY_DELAY_MS);
     for (const batch of chunk(retry, THREAD_FETCH_BATCH_SIZE)) {
       const result = fetchBatch(batch, token);
