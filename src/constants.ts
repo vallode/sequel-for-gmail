@@ -14,8 +14,6 @@ export const CACHE_TTL_SECONDS = 1800;
 export const MAX_CACHE_VALUE_BYTES = 100_000;
 export const MAX_CACHE_KEY_LENGTH = 250;
 
-/** Gmail search page size */
-export const GMAIL_SEARCH_PAGE_SIZE = 100;
 /** Gmail API threads.list maxResults upper bound */
 export const GMAIL_API_LIST_PAGE_SIZE = 500;
 /**

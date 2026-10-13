@@ -1,18 +1,23 @@
 import { buildReplyMime, decideAutoFollowUp } from "./auto-follow-up-core.ts";
 import {
   AUTO_FOLLOWUP_TRIGGER_HOURS,
+  FOLLOWUP_AUTO_LABEL,
+  FOLLOWUP_DONE_LABEL,
   MAX_AUTO_FOLLOWUP_DRAFTS_PER_RUN,
 } from "./constants.ts";
 import { getEmailDomain, parseExcludedDomainList } from "./email-utils.ts";
+import type { AutoFollowUpThreadMetadata } from "./gmail-api-core.ts";
 import { log } from "./log.ts";
-import { ensureFollowUpLabels, listLabelThreads } from "./runtime/labels.ts";
+import {
+  createThreadDraft,
+  fetchAutoFollowUpThreads,
+  listThreadIdsWithLabel,
+  modifyThreadLabels,
+} from "./runtime/gmail-api.ts";
+import { ensureFollowUpLabels } from "./runtime/labels.ts";
 import { getMyEmail } from "./runtime/session-email.ts";
 import { readUserSettings } from "./runtime/user-props.ts";
-import type {
-  AutoFollowUpDecision,
-  AutoFollowUpMessageInput,
-  AutoFollowUpOptions,
-} from "./types.ts";
+import type { AutoFollowUpDecision, AutoFollowUpOptions } from "./types.ts";
 
 export interface AutoFollowUpRunSummary {
   scanned: number;
@@ -25,20 +30,18 @@ export interface AutoFollowUpRunSummary {
 
 /** Thread IDs currently flagged for auto follow-up. */
 export function getAutoFollowUpThreadIds(): Set<string> {
-  const { auto } = ensureFollowUpLabels();
-  return new Set(listLabelThreads(auto).map((thread) => thread.getId()));
+  ensureFollowUpLabels();
+  return new Set(listThreadIdsWithLabel(FOLLOWUP_AUTO_LABEL).items);
 }
 
 export function setThreadAutoFollowUp(threadId: string, enabled: boolean): void {
-  const thread = GmailApp.getThreadById(threadId);
-  if (!thread) throw new Error("Thread not found");
-  const { auto, done } = ensureFollowUpLabels();
-  if (enabled) {
-    thread.addLabel(auto);
-    thread.removeLabel(done);
-  } else {
-    thread.removeLabel(auto);
-  }
+  ensureFollowUpLabels();
+  modifyThreadLabels(
+    threadId,
+    enabled
+      ? { add: [FOLLOWUP_AUTO_LABEL], remove: [FOLLOWUP_DONE_LABEL] }
+      : { remove: [FOLLOWUP_AUTO_LABEL] },
+  );
 }
 
 /**
@@ -61,43 +64,22 @@ export function syncAutoFollowUpTrigger(enabled: boolean): void {
   }
 }
 
-function toMessageInput(
-  message: GoogleAppsScript.Gmail.GmailMessage,
-): AutoFollowUpMessageInput {
-  return {
-    from: message.getFrom(),
-    to: message.getTo(),
-    cc: message.getCc(),
-    date: new Date(message.getDate().getTime()),
-    subject: message.getSubject(),
-    isDraft: message.isDraft(),
-  };
-}
-
 function createFollowUpDraft(
-  threadId: string,
-  subject: string,
-  replyTo: GoogleAppsScript.Gmail.GmailMessage,
+  { thread, replyTo }: AutoFollowUpThreadMetadata,
   decision: Extract<AutoFollowUpDecision, { action: "draft" }>,
 ): void {
-  if (typeof Gmail === "undefined" || !Gmail?.Users?.Drafts) {
-    throw new Error("Advanced Gmail service is not enabled");
-  }
   const mime = buildReplyMime(
     {
       to: decision.to,
       cc: decision.cc,
-      subject,
-      inReplyTo: replyTo.getHeader("Message-ID") || replyTo.getHeader("Message-Id"),
-      references: replyTo.getHeader("References"),
+      subject: thread.messages[0]?.subject ?? "",
+      inReplyTo: replyTo.messageId,
+      references: replyTo.references,
       body: decision.body,
     },
     (text) => Utilities.base64Encode(text, Utilities.Charset.UTF_8),
   );
-  Gmail.Users.Drafts.create(
-    { message: { raw: Utilities.base64EncodeWebSafe(mime), threadId } },
-    "me",
-  );
+  createThreadDraft(thread.threadId, mime);
 }
 
 /**
@@ -130,12 +112,20 @@ export function runAutoFollowUps(now: Date = new Date()): AutoFollowUpRunSummary
   if (!lock.tryLock(5_000)) return { ...summary, skipped: "locked" };
 
   try {
-    const { auto, done } = ensureFollowUpLabels();
-    const threads = listLabelThreads(auto);
-    summary.scanned = threads.length;
-    if (threads.length === 0) return summary;
+    ensureFollowUpLabels();
+    const threadIds = listThreadIdsWithLabel(FOLLOWUP_AUTO_LABEL).items;
+    summary.scanned = threadIds.length;
+    if (threadIds.length === 0) return summary;
 
-    const allMessages = GmailApp.getMessagesForThreads(threads);
+    const fetched = fetchAutoFollowUpThreads(threadIds);
+    if (fetched.failed > 0) {
+      // Unfetched threads are simply retried on the next hourly run
+      summary.failed += fetched.failed;
+      log.warn("auto follow-up threads could not be fetched", {
+        failed: fetched.failed,
+        firstError: fetched.firstError,
+      });
+    }
     const options: AutoFollowUpOptions = {
       now,
       steps: settings.autoFollowUpSteps,
@@ -145,36 +135,29 @@ export function runAutoFollowUps(now: Date = new Date()): AutoFollowUpRunSummary
       myDomain: getEmailDomain(myEmail),
     };
 
-    threads.forEach((thread, i) => {
-      const threadId = thread.getId();
-      const messages = allMessages[i].filter((message) => !message.isInTrash());
-      const decision = decideAutoFollowUp(
-        { threadId, messages: messages.map(toMessageInput) },
-        options,
-      );
+    for (const metadata of fetched.threads) {
+      const { threadId } = metadata.thread;
+      const decision = decideAutoFollowUp(metadata.thread, options);
 
       try {
         if (decision.action === "draft") {
           if (summary.drafted >= MAX_AUTO_FOLLOWUP_DRAFTS_PER_RUN) {
             summary.waiting++;
-            return;
+            continue;
           }
           // A draft decision implies no drafts on the thread, so the last
-          // message is the user's latest sent message.
-          createFollowUpDraft(
-            threadId,
-            messages[0].getSubject(),
-            messages[messages.length - 1],
-            decision,
-          );
+          // message (whose headers are in replyTo) is the user's latest sent.
+          createFollowUpDraft(metadata, decision);
           summary.drafted++;
           log.info("auto follow-up drafted", {
             threadId,
             step: decision.stepIndex + 1,
           });
         } else if (decision.action === "stop") {
-          thread.removeLabel(auto);
-          thread.addLabel(done);
+          modifyThreadLabels(threadId, {
+            add: [FOLLOWUP_DONE_LABEL],
+            remove: [FOLLOWUP_AUTO_LABEL],
+          });
           summary.stopped++;
           log.info("auto follow-up stopped", { threadId, reason: decision.reason });
         } else {
@@ -184,7 +167,7 @@ export function runAutoFollowUps(now: Date = new Date()): AutoFollowUpRunSummary
         summary.failed++;
         log.error("auto follow-up failed on thread", { threadId, error: err });
       }
-    });
+    }
   } finally {
     lock.releaseLock();
   }
