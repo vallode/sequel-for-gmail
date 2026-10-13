@@ -34,16 +34,10 @@ function syncWaitingLabel(
   scanned: ThreadMetadata[],
   emails: PendingEmail[],
   searchTruncated: boolean,
-): void {
-  const te = Date.now();
+): { labelled: number; added: number; removed: number } {
   ensureFollowUpLabels();
-  perf("ensureFollowUpLabels", te);
-  const t0 = Date.now();
   const labelled = listThreadIdsWithLabel(FOLLOWUP_WAITING_LABEL);
-  perf("listThreadIdsWithLabel", t0, {
-    threads: labelled.items.length,
-    truncated: labelled.truncated,
-  });
+  if (labelled.truncated) log.warn("waiting label listing truncated");
   const changes = diffLabelMembership(
     new Set(emails.map((e) => e.threadId)),
     new Set(labelled.items),
@@ -55,10 +49,11 @@ function syncWaitingLabel(
     scanned.filter((t) => toAdd.has(t.thread.threadId)).flatMap((t) => t.messageIds),
   );
   removeLabelFromThreadIds(FOLLOWUP_WAITING_LABEL, changes.remove);
-  log.debug("waiting label changes", {
+  return {
+    labelled: labelled.items.length,
     added: changes.add.length,
     removed: changes.remove.length,
-  });
+  };
 }
 
 function tryWriteCache(
@@ -128,11 +123,9 @@ export function getPendingFollowUps(
   }
   perf("Threads.list", t1, { threads: threadIds.length, searchTruncated });
 
-  const tu = Date.now();
   const myEmail = getMyEmail();
   const myDomain = getMyDomain();
   const domainList = parseExcludedDomainList(settings.excludedDomains);
-  perf("getMyEmail", tu);
 
   let scanned: ThreadMetadata[] = [];
   let fetchFailed = 0;
@@ -188,16 +181,13 @@ export function getPendingFollowUps(
 
   const t3 = Date.now();
   try {
-    syncWaitingLabel(scanned, emails, searchTruncated);
+    perf("syncWaitingLabel", t3, syncWaitingLabel(scanned, emails, searchTruncated));
   } catch (err) {
     log.error("waiting label sync failed", err);
   }
-  perf("syncWaitingLabel", t3);
 
   // A partial fetch is worth showing but not caching; the next load retries it
-  const tc = Date.now();
   if (fetchFailed === 0) tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
-  perf("tryWriteCache", tc);
 
   perf("getPendingFollowUps", t0, {
     pending: emails.length,

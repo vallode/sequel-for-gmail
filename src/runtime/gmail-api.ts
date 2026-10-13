@@ -16,7 +16,7 @@ import {
   parseThreadMetadata,
   type ThreadMetadata,
 } from "../gmail-api-core.ts";
-import { log, perf } from "../log.ts";
+import { log } from "../log.ts";
 import { chunk } from "../util.ts";
 
 function gmailApi(): GoogleAppsScript.Gmail {
@@ -83,7 +83,6 @@ function fetchRound(ids: string[], token: string): ThreadRound {
 
   const groups = chunk(ids, THREAD_FETCH_BATCH_SIZE);
   const boundary = `sequel_batch_${Date.now()}`;
-  const t0 = Date.now();
   const responses = UrlFetchApp.fetchAll(
     groups.map((group) => ({
       url: GMAIL_BATCH_URL,
@@ -94,10 +93,6 @@ function fetchRound(ids: string[], token: string): ThreadRound {
       muteHttpExceptions: true,
     })),
   );
-  perf("threads.get batch requests", t0, {
-    requests: groups.length,
-    threads: ids.length,
-  });
 
   responses.forEach((res, g) => {
     const group = groups[g];
