@@ -365,7 +365,7 @@ export function buildHomepageCard(
     try {
       autoFollowUpThreadIds = getAutoFollowUpThreadIds();
     } catch (err) {
-      log.error("auto follow-up lookup failed", err);
+      log.error("auto follow-up lookup failed", { error: err });
       autoFollowUpThreadIds = new Set();
     }
     card.addSection(

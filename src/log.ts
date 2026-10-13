@@ -5,20 +5,21 @@
  * STACKDRIVER`): the method picks the severity and an object argument becomes
  * a queryable `jsonPayload`. Every entry carries `message` plus optional
  * fields, so logs can be filtered with e.g. `jsonPayload.handler="_onRefresh"`.
+ * Pass a caught error as the `error` field to log its name, message and stack.
  *
  * Never log email addresses, subjects or bodies; thread IDs and counts are fine.
  */
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
 
-export interface SerializedError {
+interface SerializedError {
   name: string;
   message: string;
   stack?: string;
 }
 
-export interface LogEntry extends LogFields {
+interface LogEntry extends LogFields {
   message: string;
 }
 
@@ -37,19 +38,15 @@ export function serializeError(err: unknown): SerializedError {
   return { name: "NonError", message: String(err) };
 }
 
-export function buildLogEntry(
-  message: string,
-  fields: LogFields = {},
-  err?: unknown,
-): LogEntry {
+export function buildLogEntry(message: string, fields: LogFields = {}): LogEntry {
   const entry: LogEntry = { ...fields, message: `[sequel] ${message}` };
-  if (err !== undefined) entry.error = serializeError(err);
+  if (fields.error !== undefined) entry.error = serializeError(fields.error);
   return entry;
 }
 
-function write(level: LogLevel, message: string, fields?: LogFields, err?: unknown) {
+function write(level: LogLevel, message: string, fields?: LogFields): void {
   try {
-    SINKS[level](buildLogEntry(message, fields, err));
+    SINKS[level](buildLogEntry(message, fields));
   } catch {
     // Logging must never break a handler.
   }
@@ -58,10 +55,8 @@ function write(level: LogLevel, message: string, fields?: LogFields, err?: unkno
 export const log = {
   debug: (message: string, fields?: LogFields) => write("debug", message, fields),
   info: (message: string, fields?: LogFields) => write("info", message, fields),
-  warn: (message: string, err?: unknown, fields?: LogFields) =>
-    write("warn", message, fields, err),
-  error: (message: string, err?: unknown, fields?: LogFields) =>
-    write("error", message, fields, err),
+  warn: (message: string, fields?: LogFields) => write("warn", message, fields),
+  error: (message: string, fields?: LogFields) => write("error", message, fields),
 };
 
 /** Logs a duration (ms since `startMs`) at debug level. */
@@ -79,11 +74,10 @@ export function withLogging<A extends unknown[], R>(
   fn: (...args: A) => R,
 ): (...args: A) => R {
   return (...args: A): R => {
-    const t0 = Date.now();
     try {
       return fn(...args);
     } catch (err) {
-      log.error("unhandled error", err, { handler, durationMs: Date.now() - t0 });
+      log.error("unhandled error", { handler, error: err });
       throw err;
     }
   };

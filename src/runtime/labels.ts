@@ -38,8 +38,7 @@ export function listLabelThreads(
   const { items, truncated } = paginateSearch((start, max) =>
     label.getThreads(start, max),
   );
-  if (truncated)
-    log.warn("label threads truncated", undefined, { label: label.getName() });
+  if (truncated) log.warn("label threads truncated", { label: label.getName() });
   return items.filter((thread) => !thread.isInTrash());
 }
 
