@@ -6,14 +6,12 @@
   "oauthScopes": [
     "https://www.googleapis.com/auth/gmail.addons.execute",
     "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/script.scriptapp",
     "https://www.googleapis.com/auth/userinfo.email"
   ],
   "addOns": {
     "common": {
       "name": "Follow-Up Reminders",
-      "logoUrl": "https://cdn-icons-png.flaticon.com/512/3388/3388657.png",
+      "logoUrl": "https://raw.githubusercontent.com/vallode/sequel-for-gmail/main/assets/logo.png",
       "layoutProperties": {
         "primaryColor": "#c2e7ff"
       }
