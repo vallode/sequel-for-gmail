@@ -1,18 +1,16 @@
-import { buildFollowUpCacheKey } from "./cache-key.ts";
 import {
-  CACHE_TTL_SECONDS,
-  GMAIL_SEARCH_PAGE_SIZE,
-  MAX_CACHE_VALUE_BYTES,
-  MAX_THREADS_TO_SCAN,
-} from "./constants.ts";
+  buildFollowUpCacheKey,
+  parseCachedFollowUps,
+  serializeCachedFollowUps,
+} from "./cache-key.ts";
+import { CACHE_TTL_SECONDS, MAX_CACHE_VALUE_BYTES } from "./constants.ts";
 import { buildSearchQuery } from "./dates.ts";
 import { parseExcludedDomainList } from "./email-utils.ts";
-import { filterThreadsToPending } from "./follow-ups-core.ts";
+import { filterThreadsToPending, paginateSearch } from "./follow-ups-core.ts";
 import { getMyDomain, getMyEmail } from "./runtime/session-email.ts";
 import type {
   FollowUpQueryResult,
   PendingEmail,
-  PendingEmailSerialized,
   ThreadInput,
   UserSettings,
 } from "./types.ts";
@@ -33,30 +31,13 @@ function mapGmailThreads(
   }));
 }
 
-function deserializeCachedEmails(hit: string): PendingEmail[] | null {
+function tryWriteCache(
+  cacheKey: string,
+  emails: PendingEmail[],
+  searchTruncated: boolean,
+): void {
   try {
-    const parsed = JSON.parse(hit) as PendingEmailSerialized[];
-    if (!Array.isArray(parsed)) return null;
-    return parsed.map((e) => ({
-      threadId: e.threadId,
-      subject: e.subject,
-      to: e.to,
-      date: new Date(e.dateMs),
-    }));
-  } catch {
-    return null;
-  }
-}
-
-function tryWriteCache(cacheKey: string, emails: PendingEmail[]): void {
-  try {
-    const toCache: PendingEmailSerialized[] = emails.map((r) => ({
-      threadId: r.threadId,
-      subject: r.subject,
-      to: r.to,
-      dateMs: r.date.getTime(),
-    }));
-    const payload = JSON.stringify(toCache);
+    const payload = serializeCachedFollowUps(emails, searchTruncated);
     if (payload.length > MAX_CACHE_VALUE_BYTES) return;
     CacheService.getUserCache().put(cacheKey, payload, CACHE_TTL_SECONDS);
   } catch (err) {
@@ -78,13 +59,13 @@ export function getPendingFollowUps(
     try {
       const hit = cache.get(cacheKey);
       if (hit) {
-        const restored = deserializeCachedEmails(hit);
+        const restored = parseCachedFollowUps(hit);
         if (restored) {
           perf("getPendingFollowUps (cache hit)", t0);
           return {
-            emails: restored,
+            emails: restored.emails,
             threadsScanned: 0,
-            searchTruncated: false,
+            searchTruncated: restored.searchTruncated,
           };
         }
       }
@@ -103,26 +84,14 @@ export function getPendingFollowUps(
 
   const query = buildSearchQuery(staleCutoff, cutoff);
 
-  const collected: GoogleAppsScript.Gmail.GmailThread[] = [];
+  let collected: GoogleAppsScript.Gmail.GmailThread[] = [];
   let searchTruncated = false;
-  let start = 0;
 
   const t1 = Date.now();
   try {
-    while (collected.length < MAX_THREADS_TO_SCAN) {
-      const remaining = MAX_THREADS_TO_SCAN - collected.length;
-      const pageSize = Math.min(GMAIL_SEARCH_PAGE_SIZE, remaining);
-      const page = GmailApp.search(query, start, pageSize);
-      collected.push(...page);
-      if (page.length < pageSize) break;
-      start += pageSize;
-      if (collected.length >= MAX_THREADS_TO_SCAN) {
-        searchTruncated = true;
-        const probe = GmailApp.search(query, start, 1);
-        if (probe.length > 0) searchTruncated = true;
-        break;
-      }
-    }
+    const result = paginateSearch((start, max) => GmailApp.search(query, start, max));
+    collected = result.items;
+    searchTruncated = result.truncated;
   } catch (err) {
     console.log(
       `[sequel] Gmail search failed: ${err instanceof Error ? err.message : "unknown"}`,
@@ -177,7 +146,7 @@ export function getPendingFollowUps(
     }
   }
 
-  tryWriteCache(cacheKey, emails);
+  tryWriteCache(cacheKey, emails, searchTruncated);
 
   perf(`getPendingFollowUps (${emails.length}/${collected.length} threads)`, t0);
 

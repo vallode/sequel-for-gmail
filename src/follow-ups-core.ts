@@ -78,27 +78,30 @@ export function evaluateThreadForFollowUp(
   };
 }
 
-export interface PaginationPlan {
-  pages: number[];
-  maxThreads: number;
-  truncatedByCap: boolean;
+export interface PaginatedSearchResult<T> {
+  items: T[];
+  truncated: boolean;
 }
 
-export function planThreadPagination(
-  totalReportedByGmail: number | null,
+/**
+ * Pages through a search until it runs dry or hits `maxItems`. When the cap is
+ * reached, probes one more result so `truncated` is only set if more exist.
+ */
+export function paginateSearch<T>(
+  search: (start: number, max: number) => T[],
   pageSize: number = GMAIL_SEARCH_PAGE_SIZE,
-  maxThreads: number = MAX_THREADS_TO_SCAN,
-): PaginationPlan {
-  const pages: number[] = [];
+  maxItems: number = MAX_THREADS_TO_SCAN,
+): PaginatedSearchResult<T> {
+  const items: T[] = [];
   let start = 0;
-  while (start < maxThreads) {
-    pages.push(start);
-    start += pageSize;
-    if (totalReportedByGmail != null && start >= totalReportedByGmail) break;
+  while (items.length < maxItems) {
+    const size = Math.min(pageSize, maxItems - items.length);
+    const page = search(start, size);
+    items.push(...page);
+    if (page.length < size) return { items, truncated: false };
+    start += size;
   }
-  const truncatedByCap =
-    totalReportedByGmail == null || totalReportedByGmail > maxThreads;
-  return { pages, maxThreads, truncatedByCap };
+  return { items, truncated: search(start, 1).length > 0 };
 }
 
 export function filterThreadsToPending(

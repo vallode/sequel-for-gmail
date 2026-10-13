@@ -1,5 +1,5 @@
 import { MAX_CACHE_KEY_LENGTH } from "./constants.ts";
-import type { UserSettings } from "./types.ts";
+import type { PendingEmail, PendingEmailSerialized, UserSettings } from "./types.ts";
 
 /** FNV-1a 32-bit — works in Apps Script and Node tests */
 export function hashString(input: string): string {
@@ -27,4 +27,44 @@ export function buildFollowUpCacheKey(settings: UserSettings): string {
   const key = `fu_${hashString(payload)}`;
   if (key.length <= MAX_CACHE_KEY_LENGTH) return key;
   return `fu_${hashString(key)}`;
+}
+
+export interface CachedFollowUps {
+  emails: PendingEmail[];
+  searchTruncated: boolean;
+}
+
+export function serializeCachedFollowUps(
+  emails: PendingEmail[],
+  searchTruncated: boolean,
+): string {
+  const serialized: PendingEmailSerialized[] = emails.map((e) => ({
+    threadId: e.threadId,
+    subject: e.subject,
+    to: e.to,
+    dateMs: e.date.getTime(),
+  }));
+  return JSON.stringify({ emails: serialized, searchTruncated });
+}
+
+/** Returns null for malformed or legacy (bare array) payloads so callers refetch. */
+export function parseCachedFollowUps(raw: string): CachedFollowUps | null {
+  try {
+    const parsed = JSON.parse(raw) as {
+      emails?: PendingEmailSerialized[];
+      searchTruncated?: boolean;
+    };
+    if (!parsed || !Array.isArray(parsed.emails)) return null;
+    return {
+      emails: parsed.emails.map((e) => ({
+        threadId: e.threadId,
+        subject: e.subject,
+        to: e.to,
+        date: new Date(e.dateMs),
+      })),
+      searchTruncated: parsed.searchTruncated === true,
+    };
+  } catch {
+    return null;
+  }
 }
