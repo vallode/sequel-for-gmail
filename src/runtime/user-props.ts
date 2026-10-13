@@ -4,7 +4,12 @@ import {
   parseDismissedJson,
   removeDismissedEntry,
 } from "../dismissed-store.ts";
-import { parseSettingsFromProperties } from "../settings.ts";
+import {
+  parseSettingsFromProperties,
+  SETTINGS_PROPERTY_KEYS,
+  type SettingsPropertyBag,
+  settingsToPropertyWrites,
+} from "../settings.ts";
 import type { DismissedEmail, UserSettings } from "../types.ts";
 
 export function getUserPropertiesStore(): GoogleAppsScript.Properties.Properties {
@@ -14,14 +19,9 @@ export function getUserPropertiesStore(): GoogleAppsScript.Properties.Properties
 export function readUserSettings(
   props: GoogleAppsScript.Properties.Properties = getUserPropertiesStore(),
 ): UserSettings {
-  return parseSettingsFromProperties({
-    followup_days: props.getProperty("followup_days"),
-    stale_days: props.getProperty("stale_days"),
-    exclude_replied: props.getProperty("exclude_replied"),
-    exclude_internal: props.getProperty("exclude_internal"),
-    auto_label: props.getProperty("auto_label"),
-    excluded_domains: props.getProperty("excluded_domains"),
-  });
+  const bag: SettingsPropertyBag = {};
+  for (const key of SETTINGS_PROPERTY_KEYS) bag[key] = props.getProperty(key);
+  return parseSettingsFromProperties(bag);
 }
 
 export function writeUserSettings(
@@ -29,12 +29,7 @@ export function writeUserSettings(
   props: GoogleAppsScript.Properties.Properties = getUserPropertiesStore(),
 ): void {
   try {
-    props.setProperty("followup_days", String(settings.days));
-    props.setProperty("stale_days", String(settings.staleDays));
-    props.setProperty("exclude_replied", settings.excludeReplied ? "true" : "false");
-    props.setProperty("exclude_internal", settings.excludeInternal ? "true" : "false");
-    props.setProperty("auto_label", settings.autoLabel);
-    props.setProperty("excluded_domains", settings.excludedDomains);
+    props.setProperties(settingsToPropertyWrites(settings));
   } catch (err) {
     console.log(
       `[sequel] settings write failed: ${err instanceof Error ? err.message : "unknown"}`,

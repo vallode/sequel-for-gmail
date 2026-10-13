@@ -1,6 +1,6 @@
 # Sequel for Gmail
 
-Sequel is a Gmail add-on that surfaces **sent mail that may need a follow-up**: threads you sent at least *N* days ago that still look unanswered, with optional filters for replies, domain exclusions, internal mail, staleness, and auto-labeling. It runs on **Google Apps Script (V8)** and is deployed with [clasp](https://github.com/google/clasp).
+Sequel is a Gmail add-on that surfaces **sent mail that may need a follow-up**: threads you sent at least *N* days ago that still look unanswered, with optional filters for replies, domain exclusions, internal mail, and staleness. Pending threads are labelled `Follow-ups/Waiting`, and you can opt threads into auto follow-up drafts. It runs on **Google Apps Script (V8)** and is deployed with [clasp](https://github.com/google/clasp).
 
 **Status:** tester-only — not published on the Google Workspace Marketplace for general use.
 
@@ -15,7 +15,7 @@ Open the Sequel icon in Gmail's side panel to get the homepage card:
 - **Follow-up list:** up to 15 sent threads that are at least *N* days old (default 3) and still waiting on a reply. Each row shows the recipient, subject and age, opens the thread on click, and has a **×** button to dismiss it.
 - **Sort toggle:** switches between oldest first and newest first.
 - **Truncation notice:** appears when there are more rows than fit on the card ("… and N more"), or when the Gmail search hit its scan cap.
-- **Card actions:** **Dismissed** (review and restore dismissed threads), **Settings** (thresholds, filters, auto-label; **Save & Refresh** applies them right away) and **Source code**.
+- **Card actions:** **Dismissed** (review and restore dismissed threads), **Settings** (thresholds, filters, auto follow-up sequence; **Save & Refresh** applies them right away) and **Source code**.
 
 ## Prerequisites
 
@@ -67,7 +67,9 @@ TypeScript (src/) → esbuild → build/Code.js + build/appsscript.json → clas
 - **Runtime:** All add-on code executes inside Google Apps Script. There is no Node runtime in production. Exported functions must remain **globally scoped** so Gmail Card Service can invoke entry points and `_on*` action handlers.
 - **UI:** [Card Service](https://developers.google.com/apps-script/add-ons/gmail/extending-gmail-ui) cards built in TypeScript; homepage, settings, and dismissed views are separate card flows.
 - **Entry points:** Declared in `appsscript.json` (for example Gmail homepage trigger → `_buildHomepage`, settings card builder, dismissed card builder).
-- **Core logic:** `getPendingFollowUps()` searches Gmail for sent threads in a date window, filters by settings (replies, domains, internal recipients, stale cutoff, dismiss list), optionally applies a user label, sorts results, and returns pending items. Search work is bounded to stay within Apps Script time limits; the UI indicates when the list is truncated.
+- **Core logic:** `getPendingFollowUps()` searches Gmail for sent threads in a date window, filters by settings (replies, domains, internal recipients, stale cutoff, dismiss list), syncs the `Follow-ups/Waiting` label, sorts results, and returns pending items. Search work is bounded to stay within Apps Script time limits; the UI indicates when the list is truncated.
+- **Auto follow-up:** When enabled, an hourly time-driven trigger (`_runAutoFollowUps`) checks threads labelled `Follow-ups/Auto` and creates a draft reply from the user's message sequence when a step is due. Threads that get a reply or finish the sequence move to `Follow-ups/Done`. Drafts are created with the Advanced Gmail Service and are never sent. See [docs/auto-follow-up.md](docs/auto-follow-up.md).
+- **Labels:** Fixed and created automatically under a `Follow-ups` parent (parent first, so Gmail nests them): `Waiting` (in the follow-up list), `Auto` (flagged for auto follow-up), `Done` (flagged, then replied or sequence finished).
 - **State:** Per-user settings and dismissed reminders live in `PropertiesService.getUserProperties()`. Dismissed history is capped and pruned so storage stays bounded.
 - **Cache:** Pending follow-up results are cached per user for about **30 minutes** (`CacheService.getUserCache()`), so dismissing, restoring, and re-sorting don't rescan Gmail. The homepage shows when results were last fetched; **Refresh** on the homepage and **Save & Refresh** on settings bypass the cache.
 
@@ -78,7 +80,8 @@ All persisted data is **per Google account** in that user’s Apps Script user p
 Typical keys include:
 
 - Follow-up threshold, stale cutoff, exclude-replied / exclude-internal toggles
-- Optional excluded domains and auto-label name
+- Optional excluded domains
+- Auto follow-up toggle and message sequence (up to 3 wait/template steps)
 - Sort order preference
 - Dismissed reminders (thread id, subject, recipient snippet, sent date metadata), capped and pruned
 
@@ -86,13 +89,14 @@ Cached search results (thread metadata only, TTL ~30 minutes) live in user cache
 
 ## Privacy and permissions
 
-Sequel **reads** your Gmail (sent threads and thread metadata needed for the list) and can **create or apply labels** when you configure an auto-label. It **does not send email**.
+Sequel **reads** your Gmail (sent threads and thread metadata needed for the list) and **creates and applies** its `Follow-ups/*` labels. With auto follow-up on, it **creates draft replies** on threads you flagged. It **does not send email**.
 
 OAuth is limited to:
 
 - Running the Gmail add-on
-- Modifying Gmail (read access plus labels)
+- Modifying Gmail (read access, labels, drafts)
 - Reading the active user’s email address (for filtering and display)
+- Managing its own time-driven trigger (for the hourly auto follow-up check)
 
 Mail content is processed inside Apps Script to build the follow-up list; maintainers should treat Stackdriver logs as potentially sensitive in error scenarios.
 
@@ -127,8 +131,8 @@ You can also inspect versions and deployments in the Apps Script web editor. Pus
 - **Apps Script quotas:** each homepage load runs inside a Card Service callback (30-second limit) and counts against the user's daily Gmail read quota. Sequel scans at most **300 threads** per load (`MAX_THREADS_TO_SCAN`, in pages of 100) and caches results to limit repeat reads. User properties are limited to 9 KB per value and 500 KB in total, which is why the dismissed list is capped at **100 entries**. Cache values are capped at 100 KB, and larger result sets are simply not cached.
 - **Cache:** Homepage loads may show data up to ~30 minutes old (the "Updated X min ago" row shows how old) unless you use **Refresh** or **Save & Refresh**.
 - **Dismissed list** retains a bounded history; oldest entries are dropped when the cap is exceeded.
-- **Auto-label** creates or uses a Gmail label and applies it to matching threads when results are computed.
-- **No send:** Sequel cannot compose or send mail on your behalf.
+- **Waiting label** is synced when results are computed (not on cache hits). If the search was truncated, Sequel only adds the label and never removes it, since unscanned threads may still be pending.
+- **No send:** Sequel never sends mail on your behalf. Auto follow-up only creates drafts.
 
 ## Branding
 

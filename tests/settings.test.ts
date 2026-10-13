@@ -5,6 +5,7 @@ import {
   clampStaleDays,
   parseSettingsFromFormInput,
   parseSettingsFromProperties,
+  settingsToPropertyWrites,
 } from "../src/settings.ts";
 
 describe("settings parsing and clamping", () => {
@@ -37,19 +38,60 @@ describe("settings parsing and clamping", () => {
       stale_days: "120",
       exclude_replied: "false",
       exclude_internal: "true",
-      auto_label: "  Follow up  ",
       excluded_domains: " example.com , slack.com ",
     });
     assert.equal(s.days, 7);
     assert.equal(s.staleDays, 120);
     assert.equal(s.excludeReplied, false);
     assert.equal(s.excludeInternal, true);
-    assert.equal(s.autoLabel, "Follow up");
     assert.equal(s.excludedDomains, "example.com , slack.com");
   });
 
   it("clamps follow-up days helper", () => {
     assert.equal(clampFollowUpDays(-5), 1);
     assert.equal(clampFollowUpDays(500), 365);
+  });
+});
+
+describe("auto follow-up settings", () => {
+  it("defaults to disabled with the default sequence when never saved", () => {
+    const s = parseSettingsFromProperties({});
+    assert.equal(s.autoFollowUpEnabled, false);
+    assert.deepEqual(
+      s.autoFollowUpSteps.map((step) => step.waitDays),
+      [3, 4],
+    );
+  });
+
+  it("keeps a saved empty sequence empty", () => {
+    const s = parseSettingsFromProperties({ auto_followup_steps: "[]" });
+    assert.deepEqual(s.autoFollowUpSteps, []);
+  });
+
+  it("parses sequence slots from the form, skipping empty templates", () => {
+    const s = parseSettingsFromFormInput({
+      auto_followup_enabled: "true",
+      auto_followup_wait_1: "2",
+      auto_followup_template_1: "  First nudge ",
+      auto_followup_wait_2: "5",
+      auto_followup_template_2: "   ",
+      auto_followup_wait_3: "not-a-number",
+      auto_followup_template_3: "Last nudge",
+    });
+    assert.equal(s.autoFollowUpEnabled, true);
+    assert.deepEqual(s.autoFollowUpSteps, [
+      { waitDays: 2, template: "First nudge" },
+      { waitDays: 3, template: "Last nudge" },
+    ]);
+  });
+
+  it("round-trips through property writes", () => {
+    const s = parseSettingsFromFormInput({
+      auto_followup_enabled: "true",
+      auto_followup_wait_1: "3",
+      auto_followup_template_1: "Hi {{firstName}}",
+    });
+    const restored = parseSettingsFromProperties(settingsToPropertyWrites(s));
+    assert.deepEqual(restored, s);
   });
 });

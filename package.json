@@ -21,7 +21,7 @@
     "check": "biome check . && pnpm typecheck && pnpm test && pnpm build",
     "push": "pnpm build && clasp push",
     "pull": "clasp pull",
-    "open": "clasp open",
+    "open": "clasp open-script",
     "deploy": "pnpm build && clasp push && clasp deploy"
   },
   "devDependencies": {

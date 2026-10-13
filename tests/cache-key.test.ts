@@ -11,10 +11,11 @@ import type { UserSettings } from "../src/types.ts";
 const sampleSettings = (): UserSettings => ({
   days: 3,
   excludeReplied: true,
-  autoLabel: "Follow up",
   excludedDomains: "a.example.com,b.example.com",
   staleDays: 90,
   excludeInternal: false,
+  autoFollowUpEnabled: false,
+  autoFollowUpSteps: [],
 });
 
 describe("cache keys", () => {

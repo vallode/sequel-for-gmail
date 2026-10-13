@@ -11,7 +11,8 @@
 - [ ] Dismiss / restore / restore all
 - [ ] Truncation message (if applicable)
 - [ ] Domain exclusions
-- [ ] Auto-label
+- [ ] `Follow-ups/*` labels created and nested; Waiting synced
+- [ ] Auto follow-up: trigger installed/removed, draft created once per step
 - [ ] Cache vs Save & Refresh behavior
 
 ## Local checks

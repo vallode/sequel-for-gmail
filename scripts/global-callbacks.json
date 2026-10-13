@@ -11,5 +11,7 @@
   "_openDismissedCard",
   "_onDismissEmail",
   "_onRestoreEmail",
-  "_onClearDismissed"
+  "_onClearDismissed",
+  "_onToggleAutoFollowUp",
+  "_runAutoFollowUps"
 ]

@@ -1,11 +1,17 @@
+import { getAutoFollowUpThreadIds } from "./auto-follow-up-runner.ts";
 import { buildCatSection } from "./cat.ts";
-import { HOMEPAGE_DISPLAY_LIMIT, SOURCE_REPO_URL } from "./constants.ts";
+import {
+  HOMEPAGE_DISPLAY_LIMIT,
+  MAX_AUTO_FOLLOWUP_STEPS,
+  SOURCE_REPO_URL,
+} from "./constants.ts";
 import { formatUpdatedLabel, getDayAge } from "./dates.ts";
 import { dismissedThreadIds } from "./dismissed-store.ts";
 import { applySortOrder } from "./follow-ups-core.ts";
 import { getPendingFollowUps } from "./gmail-follow-ups.ts";
 import { getMyDomain } from "./runtime/session-email.ts";
 import { readDismissedList, readUserSettings } from "./runtime/user-props.ts";
+import { autoFollowUpFieldNames, defaultAutoFollowUpSteps } from "./settings.ts";
 import type {
   ActionEvent,
   DismissedEmail,
@@ -47,12 +53,6 @@ function buildSettingsSection(
         .setSelected(settings.excludeInternal),
     );
 
-  const autoLabelInput = CardService.newTextInput()
-    .setFieldName("auto_label")
-    .setTitle("Auto-label (optional)")
-    .setValue(settings.autoLabel)
-    .setHint("Label name to apply to follow-up threads");
-
   const excludedDomainsInput = CardService.newTextInput()
     .setFieldName("excluded_domains")
     .setTitle("Excluded domains (optional)")
@@ -72,8 +72,51 @@ function buildSettingsSection(
     .addWidget(excludeToggle)
     .addWidget(excludeInternalToggle)
     .addWidget(CardService.newDivider())
-    .addWidget(autoLabelInput)
     .addWidget(excludedDomainsInput);
+
+  return section;
+}
+
+function buildAutoFollowUpSettingsSection(
+  settings: UserSettings,
+): GoogleAppsScript.Card_Service.CardSection {
+  const section = CardService.newCardSection()
+    .setHeader("Auto follow-up drafts")
+    .addWidget(
+      CardService.newDecoratedText()
+        .setText("Create follow-up drafts")
+        .setBottomLabel("Hourly, on Follow-ups/Auto threads. Never sends.")
+        .setWrapText(true)
+        .setSwitchControl(
+          CardService.newSwitch()
+            .setFieldName("auto_followup_enabled")
+            .setValue("true")
+            .setSelected(settings.autoFollowUpEnabled),
+        ),
+    );
+
+  const fallback = defaultAutoFollowUpSteps();
+  for (let i = 0; i < MAX_AUTO_FOLLOWUP_STEPS; i++) {
+    const step = settings.autoFollowUpSteps[i];
+    const fields = autoFollowUpFieldNames(i);
+    section
+      .addWidget(CardService.newDivider())
+      .addWidget(
+        CardService.newTextInput()
+          .setFieldName(fields.waitDays)
+          .setTitle(`Step ${i + 1}: wait (days)`)
+          .setValue(String(step?.waitDays ?? fallback[i]?.waitDays ?? settings.days))
+          .setHint("Days after your last email"),
+      )
+      .addWidget(
+        CardService.newTextInput()
+          .setFieldName(fields.template)
+          .setTitle(`Step ${i + 1}: message`)
+          .setMultiline(true)
+          .setValue(step?.template ?? "")
+          .setHint("Use {{firstName}} and {{subject}}"),
+      );
+  }
 
   return section;
 }
@@ -96,6 +139,7 @@ export function buildSettingsCard(): GoogleAppsScript.Card_Service.Card {
     .setTextButtonStyle(CardService.TextButtonStyle.OUTLINED);
 
   card.addSection(buildSettingsSection(settings));
+  card.addSection(buildAutoFollowUpSettingsSection(settings));
 
   card.setFixedFooter(
     CardService.newFixedFooter()
@@ -127,6 +171,7 @@ export function buildResultsSection(
   sortAsc: boolean,
   searchTruncated: boolean,
   fetchedAt: Date,
+  autoFollowUpThreadIds: Set<string> | null = null,
 ): GoogleAppsScript.Card_Service.CardSection {
   const section = CardService.newCardSection();
   section.addWidget(buildFreshnessWidget(fetchedAt));
@@ -178,10 +223,12 @@ export function buildResultsSection(
       .setUrl(`https://mail.google.com/mail/#all/${email.threadId}`)
       .setOpenAs(CardService.OpenAs.FULL_SIZE);
 
+    const flagged = autoFollowUpThreadIds?.has(email.threadId) ?? false;
+
     const widget = CardService.newDecoratedText()
       .setTopLabel(truncate(email.to, 64))
       .setText(truncate(email.subject, 24))
-      .setBottomLabel(label)
+      .setBottomLabel(flagged ? `${label} · Auto follow-up on` : label)
       .setWrapText(true)
       .setButton(
         CardService.newTextButton()
@@ -202,6 +249,29 @@ export function buildResultsSection(
       .setOpenLink(openLink);
 
     section.addWidget(widget);
+
+    if (autoFollowUpThreadIds) {
+      section.addWidget(
+        CardService.newButtonSet().addButton(
+          CardService.newTextButton()
+            .setText(flagged ? "Stop auto follow-up" : "Auto follow-up")
+            .setMaterialIcon(
+              CardService.newMaterialIcon().setName(
+                flagged ? "cancel_schedule_send" : "schedule_send",
+              ),
+            )
+            .setOnClickAction(
+              CardService.newAction()
+                .setFunctionName("_onToggleAutoFollowUp")
+                .setParameters({
+                  threadId: email.threadId,
+                  enable: flagged ? "false" : "true",
+                }),
+            )
+            .setTextButtonStyle(CardService.TextButtonStyle.BORDERLESS),
+        ),
+      );
+    }
 
     if (index < visible.length - 1) {
       section.addWidget(CardService.newDivider());
@@ -225,6 +295,29 @@ export function buildResultsSection(
   }
 
   return section;
+}
+
+function buildAutoFollowUpStatusSection(
+  settings: UserSettings,
+  flaggedCount: number,
+): GoogleAppsScript.Card_Service.CardSection {
+  const steps = settings.autoFollowUpSteps.length;
+  const text =
+    steps === 0
+      ? "Auto follow-up is on, but no message templates are set. Add one in Settings."
+      : `Auto follow-up drafts on · ${flaggedCount} flagged thread${
+          flaggedCount !== 1 ? "s" : ""
+        } · ${steps}-step sequence`;
+  return CardService.newCardSection().addWidget(
+    CardService.newDecoratedText()
+      .setText(text)
+      .setWrapText(true)
+      .setStartIcon(
+        CardService.newIconImage().setMaterialIcon(
+          CardService.newMaterialIcon().setName("schedule_send"),
+        ),
+      ),
+  );
 }
 
 export function buildHomepageCard(
@@ -266,6 +359,21 @@ export function buildHomepageCard(
         ),
     );
 
+  let autoFollowUpThreadIds: Set<string> | null = null;
+  if (settings.autoFollowUpEnabled) {
+    try {
+      autoFollowUpThreadIds = getAutoFollowUpThreadIds();
+    } catch (err) {
+      console.log(
+        `[sequel] auto follow-up lookup failed: ${err instanceof Error ? err.message : "unknown"}`,
+      );
+      autoFollowUpThreadIds = new Set();
+    }
+    card.addSection(
+      buildAutoFollowUpStatusSection(settings, autoFollowUpThreadIds.size),
+    );
+  }
+
   card.addSection(
     buildResultsSection(
       visibleEmails,
@@ -273,6 +381,7 @@ export function buildHomepageCard(
       sortAsc,
       searchTruncated,
       fetchedAt,
+      autoFollowUpThreadIds,
     ),
   );
   card.addSection(buildCatSection());

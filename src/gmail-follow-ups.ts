@@ -3,14 +3,17 @@ import {
   parseCachedFollowUps,
   serializeCachedFollowUps,
 } from "./cache-key.ts";
-import {
-  CACHE_TTL_SECONDS,
-  LABEL_BATCH_SIZE,
-  MAX_CACHE_VALUE_BYTES,
-} from "./constants.ts";
+import { CACHE_TTL_SECONDS, MAX_CACHE_VALUE_BYTES } from "./constants.ts";
 import { buildSearchQuery } from "./dates.ts";
 import { parseExcludedDomainList } from "./email-utils.ts";
 import { filterThreadsToPending, paginateSearch } from "./follow-ups-core.ts";
+import { diffLabelMembership } from "./labels-core.ts";
+import {
+  addLabelToThreads,
+  ensureFollowUpLabels,
+  listLabelThreads,
+  removeLabelFromThreads,
+} from "./runtime/labels.ts";
 import { getMyDomain, getMyEmail } from "./runtime/session-email.ts";
 import type {
   FollowUpQueryResult,
@@ -18,7 +21,7 @@ import type {
   ThreadInput,
   UserSettings,
 } from "./types.ts";
-import { chunk, perf } from "./util.ts";
+import { perf } from "./util.ts";
 
 function mapGmailThreads(
   threads: GoogleAppsScript.Gmail.GmailThread[],
@@ -33,6 +36,35 @@ function mapGmailThreads(
       subject: msg.getSubject(),
     })),
   }));
+}
+
+/**
+ * Keeps `Follow-ups/Waiting` equal to the current follow-up list: labels new
+ * pending threads and unlabels ones that dropped out. Unlabelling is skipped
+ * when the search was truncated, since unscanned threads may still be pending.
+ */
+function syncWaitingLabel(
+  scanned: GoogleAppsScript.Gmail.GmailThread[],
+  emails: PendingEmail[],
+  searchTruncated: boolean,
+): void {
+  const { waiting } = ensureFollowUpLabels();
+  const labelled = listLabelThreads(waiting);
+  const changes = diffLabelMembership(
+    new Set(emails.map((e) => e.threadId)),
+    new Set(labelled.map((t) => t.getId())),
+    !searchTruncated,
+  );
+  const toAdd = new Set(changes.add);
+  const toRemove = new Set(changes.remove);
+  addLabelToThreads(
+    waiting,
+    scanned.filter((t) => toAdd.has(t.getId())),
+  );
+  removeLabelFromThreads(
+    waiting,
+    labelled.filter((t) => toRemove.has(t.getId())),
+  );
 }
 
 function tryWriteCache(
@@ -139,20 +171,12 @@ export function getPendingFollowUps(
     myDomain,
   });
 
-  if (settings.autoLabel) {
-    try {
-      let label = GmailApp.getUserLabelByName(settings.autoLabel);
-      if (!label) label = GmailApp.createLabel(settings.autoLabel);
-      const idSet = new Set(emails.map((e) => e.threadId));
-      const toLabel = collected.filter((thread) => idSet.has(thread.getId()));
-      for (const batch of chunk(toLabel, LABEL_BATCH_SIZE)) {
-        label.addToThreads(batch);
-      }
-    } catch (err) {
-      console.log(
-        `[sequel] auto-label failed: ${err instanceof Error ? err.message : "unknown"}`,
-      );
-    }
+  try {
+    syncWaitingLabel(collected, emails, searchTruncated);
+  } catch (err) {
+    console.log(
+      `[sequel] waiting label sync failed: ${err instanceof Error ? err.message : "unknown"}`,
+    );
   }
 
   tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);

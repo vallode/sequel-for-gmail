@@ -31,10 +31,14 @@ Sequel is a Gmail add-on built on Google Apps Script (V8 runtime), written in Ty
 
 **UI:** Google Card Service API. Entry functions declared in `src/appsscript.json`: `_buildHomepage`, `buildSettingsCard`, `buildDismissedCard`.
 
-**State:** User settings via `PropertiesService.getUserProperties()`. Dismissed emails are stored as JSON under `dismissed_ids` (capped, lock-protected updates). Follow-up results cached ~5 minutes in `CacheService` with hashed keys; Save & Refresh bypasses cache.
+**State:** User settings via `PropertiesService.getUserProperties()`. Dismissed emails are stored as JSON under `dismissed_ids` (capped, lock-protected updates). Follow-up results cached ~30 minutes in `CacheService` with hashed keys; Save & Refresh and the homepage Refresh action bypass cache.
 
-**Core logic:** `getPendingFollowUps()` paginates Gmail sent-thread search (bounded), filters threads in `follow-ups-core.ts` (replies, domains, internal, stale window), optionally auto-labels.
+**Core logic:** `getPendingFollowUps()` paginates Gmail sent-thread search (bounded), filters threads in `follow-ups-core.ts` (replies, domains, internal, stale window), and syncs the `Follow-ups/Waiting` label.
 
-**OAuth scopes:** `gmail.addons.execute` (add-on runtime), `gmail.modify` (search threads and apply labels — covers all `GmailApp` usage), `userinfo.email` (`Session.getActiveUser().getEmail()`). Removed `gmail.readonly` (redundant with modify) and `script.scriptapp` (no Script Apps API usage).
+**Labels:** Fixed, not user-configurable: `Follow-ups` parent with `Waiting`, `Auto`, `Done` children (`FOLLOWUP_LABELS` in `constants.ts`). `ensureFollowUpLabels()` in `runtime/labels.ts` creates missing ones parent-first.
 
-**Action handlers:** Functions prefixed with `_on` or `_open` are Card Service callbacks and must remain globally accessible in the bundle. Export them from `src/entry.ts` and list them in `scripts/global-callbacks.json` (used by the build footer); `tests/callbacks.test.ts` enforces both.
+**Auto follow-up:** Hourly time-driven trigger `_runAutoFollowUps` (installed/removed by `syncAutoFollowUpTrigger` on settings save) scans threads labelled `Follow-ups/Auto`. Pure decisions live in `auto-follow-up-core.ts` (state derived from the thread: trailing sent-by-user count, open drafts); Gmail side effects in `auto-follow-up-runner.ts`. Creates drafts only, via the Advanced Gmail Service; never sends. See `docs/auto-follow-up.md`.
+
+**OAuth scopes:** `gmail.addons.execute` (add-on runtime), `gmail.modify` (search threads, apply labels, and create drafts via the Advanced Gmail Service — covers all `GmailApp` usage), `userinfo.email` (`Session.getActiveUser().getEmail()`), `script.scriptapp` (auto follow-up time-driven trigger). `gmail.readonly` is not requested (redundant with modify). Don't use `GmailApp` send/draft methods: they require the full `mail.google.com` scope.
+
+**Action handlers:** Functions prefixed with `_on` or `_open` are Card Service callbacks and must remain globally accessible in the bundle. The same applies to trigger handlers (`_runAutoFollowUps`). Export them from `src/entry.ts` and list them in `scripts/global-callbacks.json` (used by the build footer); `tests/callbacks.test.ts` enforces both.

@@ -35,10 +35,13 @@ Automated tests do not cover Gmail. After `pnpm push` (or your tester deployment
 - [ ] **Restore All** clears dismissed state as expected
 - [ ] With enough matching mail, confirm **truncation messaging** when results exceed UI/search limits
 - [ ] **Excluded domains** skip intended recipients
-- [ ] **Auto-label** applies (or creates) the configured label on matching threads
+- [ ] First load creates `Follow-ups` with `Waiting`, `Auto`, `Done` nested under it; pending threads get `Follow-ups/Waiting`, and a thread that gets a reply loses it on the next refresh
+- [ ] **Settings → Auto follow-up drafts**: enable, edit a step, Save & Refresh; the homepage shows the status line and per-row **Auto follow-up** buttons, and one `_runAutoFollowUps` trigger exists (Apps Script editor → Triggers)
+- [ ] Flag a thread, run `_runAutoFollowUps` from the editor (with a 1-day step on an older thread); a threaded draft appears addressed to the original recipients, and a second run does not add another draft
+- [ ] A flagged thread that got a reply moves from `Follow-ups/Auto` to `Follow-ups/Done` on the next run
+- [ ] Disable auto follow-up and save; the trigger is removed
 - [ ] Re-open homepage within ~30 minutes; confirm **cache** behavior ("Updated X min ago" keeps counting, dismiss/sort don't rescan)
 - [ ] **Refresh** on the homepage refetches and resets the label to "Updated just now"
-- [ ] With **Auto-label** set, matching threads get the label
 
 ## Releases and dependency maintenance
 

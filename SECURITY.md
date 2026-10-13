@@ -18,7 +18,7 @@ Do not include exploit proof-of-concepts, weaponized payloads, or instructions t
 
 Sequel persists **per-user** data in Google Apps Script **user properties** for the signed-in Google account:
 
-- Settings (follow-up days, filters, optional domain list, auto-label name, sort preference)
+- Settings (follow-up days, filters, optional domain list, auto follow-up sequence, sort preference)
 - A bounded list of dismissed reminders (thread identifiers and display metadata such as subject and recipient)
 
 Short-lived **cache** entries (roughly five minutes) may hold serialized follow-up search results and the user’s email address for performance. Cache is not intended as durable storage.
@@ -30,10 +30,11 @@ Sequel does **not** maintain a separate Sequel-operated server database for user
 The add-on requests OAuth scopes limited to:
 
 - Running the Gmail add-on
-- Modifying Gmail (**read** mail and **manage labels** — it does not send mail)
+- Modifying Gmail (**read** mail, **manage labels**, and **create drafts** — it does not send mail)
 - Reading the active user’s **email address**
+- Managing the add-on's own **time-driven trigger** (hourly auto follow-up check, only while enabled)
 
-Mail is accessed only to build the follow-up list and apply optional labels you configure. Dismissed state and settings stay in your Google account’s Apps Script user properties.
+Mail is accessed only to build the follow-up list, apply its `Follow-ups/*` labels, and, when auto follow-up is on, create draft replies on threads you flagged. Drafts are never sent automatically. Dismissed state and settings stay in your Google account’s Apps Script user properties.
 
 ## AGPL
 

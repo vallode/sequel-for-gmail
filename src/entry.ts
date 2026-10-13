@@ -1,4 +1,9 @@
 /// <reference path="./card-service-extensions.d.ts" />
+import {
+  runAutoFollowUps,
+  setThreadAutoFollowUp,
+  syncAutoFollowUpTrigger,
+} from "./auto-follow-up-runner.ts";
 import { buildDismissedCard, buildHomepageCard, buildSettingsCard } from "./cards.ts";
 import {
   clearDismissedList,
@@ -18,15 +23,41 @@ export function _buildHomepage(
 
 export { buildDismissedCard, buildSettingsCard };
 
+function saveSettingsNotice(enabled: boolean, hasSteps: boolean, ok: boolean): string {
+  if (!ok) return "Settings saved, but auto follow-ups could not be scheduled";
+  if (enabled && !hasSteps) {
+    return "Settings saved. Add a template to start auto follow-ups";
+  }
+  return "Settings saved";
+}
+
 export function _onSaveSettings(
   e: ActionEvent,
 ): GoogleAppsScript.Card_Service.ActionResponse {
   const settings = parseSettingsFromFormInput(e.formInput ?? {});
   writeUserSettings(settings);
 
+  let scheduled = true;
+  try {
+    syncAutoFollowUpTrigger(settings.autoFollowUpEnabled);
+  } catch (err) {
+    scheduled = false;
+    console.log(
+      `[sequel] trigger sync failed: ${err instanceof Error ? err.message : "unknown"}`,
+    );
+  }
+
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(_buildHomepage(e, true)))
-    .setNotification(CardService.newNotification().setText("Settings saved"))
+    .setNotification(
+      CardService.newNotification().setText(
+        saveSettingsNotice(
+          settings.autoFollowUpEnabled,
+          settings.autoFollowUpSteps.length > 0,
+          scheduled,
+        ),
+      ),
+    )
     .build();
 }
 
@@ -159,4 +190,46 @@ export function _onClearDismissed(
       CardService.newNotification().setText("All dismissed emails cleared"),
     )
     .build();
+}
+
+export function _onToggleAutoFollowUp(
+  e: ActionEvent,
+): GoogleAppsScript.Card_Service.ActionResponse {
+  const threadId = e.parameters?.threadId?.trim();
+  const enable = e.parameters?.enable === "true";
+  let ok = false;
+  if (threadId) {
+    try {
+      setThreadAutoFollowUp(threadId, enable);
+      ok = true;
+    } catch (err) {
+      console.log(
+        `[sequel] auto follow-up toggle failed: ${err instanceof Error ? err.message : "unknown"}`,
+      );
+    }
+  }
+
+  const message = !ok
+    ? "Could not update auto follow-up"
+    : enable
+      ? "Auto follow-up on for this thread"
+      : "Auto follow-up off for this thread";
+
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(_buildHomepage(e)))
+    .setNotification(CardService.newNotification().setText(message))
+    .build();
+}
+
+/** Time-driven trigger handler installed by `syncAutoFollowUpTrigger`. */
+export function _runAutoFollowUps(): void {
+  try {
+    const summary = runAutoFollowUps();
+    if (summary.skipped)
+      console.log(`[sequel] auto follow-up skipped: ${summary.skipped}`);
+  } catch (err) {
+    console.log(
+      `[sequel] auto follow-up run failed: ${err instanceof Error ? err.message : "unknown"}`,
+    );
+  }
 }
