@@ -41,6 +41,8 @@ pnpm exec clasp login
 
 The script project ID and `rootDir` (`build/`) are already set in `.clasp.json`.
 
+**Enable the Gmail API** in the Google Cloud project linked to the script (Apps Script editor → Project Settings → Google Cloud Platform project), via APIs & Services → Library → Gmail API → Enable. The follow-up list and auto follow-up drafts call the Gmail API directly; without it the homepage shows "Gmail API has not been used in project … or it is disabled". Enabling the advanced service in `appsscript.json` does not turn the API on in a linked Cloud project.
+
 ## Commands
 
 | Command | Purpose |
