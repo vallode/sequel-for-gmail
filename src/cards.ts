@@ -9,6 +9,7 @@ import { formatUpdatedLabel, getDayAge } from "./dates.ts";
 import { dismissedThreadIds } from "./dismissed-store.ts";
 import { applySortOrder } from "./follow-ups-core.ts";
 import { getPendingFollowUps } from "./gmail-follow-ups.ts";
+import { requireFullAuthorization } from "./runtime/authorization.ts";
 import { getMyDomain } from "./runtime/session-email.ts";
 import { readDismissedList, readUserSettings } from "./runtime/user-props.ts";
 import { autoFollowUpFieldNames, defaultAutoFollowUpSteps } from "./settings.ts";
@@ -335,6 +336,7 @@ export function buildHomepageCard(
   ignoreCache = false,
 ): GoogleAppsScript.Card_Service.Card {
   const t0 = Date.now();
+  requireFullAuthorization();
   const settings = readUserSettings();
   const { emails, searchTruncated, fetchedAt, error } = getPendingFollowUps(
     settings,
