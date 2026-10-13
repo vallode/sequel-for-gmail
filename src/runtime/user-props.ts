@@ -5,24 +5,38 @@ import {
   removeDismissedEntry,
 } from "../dismissed-store.ts";
 import { log } from "../log.ts";
-import {
-  parseSettingsFromProperties,
-  SETTINGS_PROPERTY_KEYS,
-  type SettingsPropertyBag,
-  settingsToPropertyWrites,
-} from "../settings.ts";
+import { parseSettingsFromProperties, settingsToPropertyWrites } from "../settings.ts";
 import type { DismissedEmail, UserSettings } from "../types.ts";
 
 export function getUserPropertiesStore(): GoogleAppsScript.Properties.Properties {
   return PropertiesService.getUserProperties();
 }
 
+// Each getProperty call is a separate round trip (~30-55 ms in logs), so
+// readers take one getProperties() snapshot instead of reading keys one by one.
+
 export function readUserSettings(
   props: GoogleAppsScript.Properties.Properties = getUserPropertiesStore(),
 ): UserSettings {
-  const bag: SettingsPropertyBag = {};
-  for (const key of SETTINGS_PROPERTY_KEYS) bag[key] = props.getProperty(key);
-  return parseSettingsFromProperties(bag);
+  return parseSettingsFromProperties(props.getProperties());
+}
+
+export interface HomepageProps {
+  settings: UserSettings;
+  sortAsc: boolean;
+  dismissed: DismissedEmail[];
+}
+
+/** Everything the homepage reads from user properties, in one round trip. */
+export function readHomepageProps(
+  props: GoogleAppsScript.Properties.Properties = getUserPropertiesStore(),
+): HomepageProps {
+  const all = props.getProperties();
+  return {
+    settings: parseSettingsFromProperties(all),
+    sortAsc: all.sort_order !== "desc",
+    dismissed: parseDismissedJson(all[DISMISSED_PROPERTY_KEY]),
+  };
 }
 
 export function writeUserSettings(

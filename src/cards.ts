@@ -12,7 +12,11 @@ import { getPendingFollowUps } from "./gmail-follow-ups.ts";
 import { log, perf } from "./log.ts";
 import { requireFullAuthorization } from "./runtime/authorization.ts";
 import { getMyDomain } from "./runtime/session-email.ts";
-import { readDismissedList, readUserSettings } from "./runtime/user-props.ts";
+import {
+  readDismissedList,
+  readHomepageProps,
+  readUserSettings,
+} from "./runtime/user-props.ts";
 import { autoFollowUpFieldNames, defaultAutoFollowUpSteps } from "./settings.ts";
 import type {
   ActionEvent,
@@ -340,21 +344,15 @@ export function buildHomepageCard(
   requireFullAuthorization();
   perf("requireFullAuthorization", t0);
   let step = Date.now();
-  const settings = readUserSettings();
-  perf("homepage: readUserSettings", step);
+  const props = readHomepageProps();
+  perf("homepage: readHomepageProps", step);
+  const { settings, sortAsc } = props;
   const { emails, searchTruncated, fetchedAt, error } = getPendingFollowUps(
     settings,
     ignoreCache,
   );
-  step = Date.now();
-  const sortAsc =
-    PropertiesService.getUserProperties().getProperty("sort_order") !== "desc";
-  perf("homepage: read sort order", step);
-
-  step = Date.now();
-  const dismissed = dismissedThreadIds(readDismissedList());
+  const dismissed = dismissedThreadIds(props.dismissed);
   const visibleEmails = emails.filter((e) => !dismissed.has(e.threadId));
-  perf("homepage: read dismissed list", step, { dismissed: dismissed.size });
 
   step = Date.now();
   const card = CardService.newCardBuilder()
