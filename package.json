@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "clean": "node -e \"require('node:fs').rmSync('build', { recursive: true, force: true })\"",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",

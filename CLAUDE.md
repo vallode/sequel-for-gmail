@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 pnpm install     # Install dev dependencies (Corepack uses packageManager pin)
+pnpm clean       # Delete build/
 pnpm build       # Bundle TypeScript → build/Code.js + copy appsscript.json
 pnpm typecheck   # tsc --noEmit
 pnpm lint        # biome check .
@@ -36,4 +37,4 @@ Sequel is a Gmail add-on built on Google Apps Script (V8 runtime), written in Ty
 
 **OAuth scopes:** `gmail.addons.execute` (add-on runtime), `gmail.modify` (search threads and apply labels — covers all `GmailApp` usage), `userinfo.email` (`Session.getActiveUser().getEmail()`). Removed `gmail.readonly` (redundant with modify) and `script.scriptapp` (no Script Apps API usage).
 
-**Action handlers:** Functions prefixed with `_on` or `_open` are Card Service callbacks and must remain globally accessible in the bundle.
+**Action handlers:** Functions prefixed with `_on` or `_open` are Card Service callbacks and must remain globally accessible in the bundle. Export them from `src/entry.ts` and list them in `scripts/global-callbacks.json` (used by the build footer); `tests/callbacks.test.ts` enforces both.

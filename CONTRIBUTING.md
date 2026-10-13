@@ -38,9 +38,34 @@ Automated tests do not cover Gmail. After `pnpm push` (or your tester deployment
 - [ ] **Auto-label** applies (or creates) the configured label on matching threads
 - [ ] Re-open homepage within ~5 minutes without Save & Refresh; confirm **cache** behavior (stale until refresh path bypasses cache)
 
+## Releases and dependency maintenance
+
+**Monthly, or when a security advisory lands:**
+
+1. Run `pnpm outdated`, then `pnpm update` (or `pnpm update --latest` for majors, one at a time).
+2. Run `pnpm check` and commit the updated `pnpm-lock.yaml` with a note on what changed.
+3. Check the Node LTS version in `.github/workflows/ci.yml` and `package.json` `engines`, and bump them when a new LTS becomes active.
+
+**Cutting a release:**
+
+1. Make sure `main` is green in CI.
+2. Run `pnpm push` and work through the manual Gmail smoke test above against `@HEAD`.
+3. Run `pnpm deploy`, and record the new Apps Script version number.
+4. Tag the commit and push the tag:
+
+   ```bash
+   git tag -a v1.2.0 -m "Apps Script version 12: <summary>"
+   git push origin v1.2.0
+   ```
+
+5. Create a GitHub release from the tag with the deployment notes: user-visible changes, any OAuth scope changes (these make users re-authorize), and the Apps Script version to roll back to (see README → Rollback).
+
+Use semantic versioning: bump major for scope changes or breaking settings changes, minor for features, patch for fixes.
+
 ## Code expectations
 
 - Production code must remain compatible with Apps Script V8 and Card Service globals (see README architecture).
+- New Card Service callbacks (`setFunctionName(...)`) must be exported from `src/entry.ts` and listed in `scripts/global-callbacks.json`; `pnpm test` fails otherwise.
 - Prefer minimal diffs; match existing style (EditorConfig + project formatters).
 
 ## Questions

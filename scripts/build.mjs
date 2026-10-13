@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -7,20 +7,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "build");
 const outFile = join(outDir, "Code.js");
 
-const GLOBAL_CALLBACKS = [
-  "_buildHomepage",
-  "buildSettingsCard",
-  "buildDismissedCard",
-  "_onSaveSettings",
-  "_onBack",
-  "_onBackFromDismissed",
-  "_onToggleSort",
-  "_openSettingsCard",
-  "_openDismissedCard",
-  "_onDismissEmail",
-  "_onRestoreEmail",
-  "_onClearDismissed",
-];
+// Shared with tests/callbacks.test.ts, which checks it against the source.
+const GLOBAL_CALLBACKS = JSON.parse(
+  readFileSync(join(root, "scripts/global-callbacks.json"), "utf8"),
+);
 
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });

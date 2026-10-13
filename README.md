@@ -8,6 +8,15 @@ Sequel is a Gmail add-on that surfaces **sent mail that may need a follow-up**: 
 
 **Repository:** https://github.com/vallode/sequel-for-gmail
 
+## What you see
+
+Open the Sequel icon in Gmail's side panel to get the homepage card:
+
+- **Follow-up list:** up to 15 sent threads that are at least *N* days old (default 3) and still waiting on a reply. Each row shows the recipient, subject and age, opens the thread on click, and has a **×** button to dismiss it.
+- **Sort toggle:** switches between oldest first and newest first.
+- **Truncation notice:** appears when there are more rows than fit on the card ("… and N more"), or when the Gmail search hit its scan cap.
+- **Card actions:** **Dismissed** (review and restore dismissed threads), **Settings** (thresholds, filters, auto-label; **Save & Refresh** applies them right away) and **Source code**.
+
 ## Prerequisites
 
 - **Node.js:** current Active Node LTS (Node 24 is expected in late 2026).
@@ -42,6 +51,7 @@ The script project ID and `rootDir` (`build/`) are already set in `.clasp.json`.
 | `pnpm lint` | Lint |
 | `pnpm format` | Format sources |
 | `pnpm typecheck` | TypeScript typecheck |
+| `pnpm clean` | Delete `build/` |
 | `pnpm build` | esbuild bundles TypeScript into one global-scope `build/Code.js` and copies `appsscript.json` into `build/` |
 | `pnpm push` | Build and push `build/` to the linked Apps Script project (**overwrites** remote project files) |
 | `pnpm pull` | Pull the latest script from Apps Script |
@@ -114,6 +124,7 @@ You can also inspect versions and deployments in the Apps Script web editor. Pus
 
 - **Tester-only** distribution; marketplace listing and OAuth verification are out of scope for this README.
 - **Gmail search** is paginated internally but **capped** to protect execution time; very large mailboxes may not scan every matching thread in one run. The card shows when results are truncated (including a cap on visible rows).
+- **Apps Script quotas:** each homepage load runs inside a Card Service callback (30-second limit) and counts against the user's daily Gmail read quota. Sequel scans at most **300 threads** per load (`MAX_THREADS_TO_SCAN`, in pages of 100) and caches results to limit repeat reads. User properties are limited to 9 KB per value and 500 KB in total, which is why the dismissed list is capped at **100 entries**. Cache values are capped at 100 KB, and larger result sets are simply not cached.
 - **Cache:** Homepage loads may show data up to ~5 minutes old unless you use **Save & Refresh** or otherwise bypass cache.
 - **Dismissed list** retains a bounded history; oldest entries are dropped when the cap is exceeded.
 - **Auto-label** creates or uses a Gmail label and applies it to matching threads when results are computed.

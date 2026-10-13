@@ -1,0 +1,14 @@
+[
+  "_buildHomepage",
+  "buildSettingsCard",
+  "buildDismissedCard",
+  "_onSaveSettings",
+  "_onBack",
+  "_onBackFromDismissed",
+  "_onToggleSort",
+  "_openSettingsCard",
+  "_openDismissedCard",
+  "_onDismissEmail",
+  "_onRestoreEmail",
+  "_onClearDismissed"
+]
