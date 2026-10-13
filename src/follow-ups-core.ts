@@ -120,6 +120,7 @@ export function mergeFollowUpResult(
   emails: PendingEmail[],
   threadsScanned: number,
   searchTruncated: boolean,
+  fetchedAt: Date,
 ): FollowUpQueryResult {
-  return { emails, threadsScanned, searchTruncated };
+  return { emails, threadsScanned, searchTruncated, fetchedAt };
 }

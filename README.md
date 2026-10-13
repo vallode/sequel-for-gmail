@@ -69,7 +69,7 @@ TypeScript (src/) → esbuild → build/Code.js + build/appsscript.json → clas
 - **Entry points:** Declared in `appsscript.json` (for example Gmail homepage trigger → `_buildHomepage`, settings card builder, dismissed card builder).
 - **Core logic:** `getPendingFollowUps()` searches Gmail for sent threads in a date window, filters by settings (replies, domains, internal recipients, stale cutoff, dismiss list), optionally applies a user label, sorts results, and returns pending items. Search work is bounded to stay within Apps Script time limits; the UI indicates when the list is truncated.
 - **State:** Per-user settings and dismissed reminders live in `PropertiesService.getUserProperties()`. Dismissed history is capped and pruned so storage stays bounded.
-- **Cache:** Pending follow-up results are cached per user for about **5 minutes** (`CacheService.getUserCache()`). **Save & Refresh** on settings bypasses that cache so new settings take effect immediately.
+- **Cache:** Pending follow-up results are cached per user for about **30 minutes** (`CacheService.getUserCache()`), so dismissing, restoring, and re-sorting don't rescan Gmail. The homepage shows when results were last fetched; **Refresh** on the homepage and **Save & Refresh** on settings bypass the cache.
 
 ## Data stored
 
@@ -82,7 +82,7 @@ Typical keys include:
 - Sort order preference
 - Dismissed reminders (thread id, subject, recipient snippet, sent date metadata), capped and pruned
 
-Cached search results (thread metadata only, TTL ~5 minutes) live in user cache, not long-term storage.
+Cached search results (thread metadata only, TTL ~30 minutes) live in user cache, not long-term storage.
 
 ## Privacy and permissions
 
@@ -125,7 +125,7 @@ You can also inspect versions and deployments in the Apps Script web editor. Pus
 - **Tester-only** distribution; marketplace listing and OAuth verification are out of scope for this README.
 - **Gmail search** is paginated internally but **capped** to protect execution time; very large mailboxes may not scan every matching thread in one run. The card shows when results are truncated (including a cap on visible rows).
 - **Apps Script quotas:** each homepage load runs inside a Card Service callback (30-second limit) and counts against the user's daily Gmail read quota. Sequel scans at most **300 threads** per load (`MAX_THREADS_TO_SCAN`, in pages of 100) and caches results to limit repeat reads. User properties are limited to 9 KB per value and 500 KB in total, which is why the dismissed list is capped at **100 entries**. Cache values are capped at 100 KB, and larger result sets are simply not cached.
-- **Cache:** Homepage loads may show data up to ~5 minutes old unless you use **Save & Refresh** or otherwise bypass cache.
+- **Cache:** Homepage loads may show data up to ~30 minutes old (the "Updated X min ago" row shows how old) unless you use **Refresh** or **Save & Refresh**.
 - **Dismissed list** retains a bounded history; oldest entries are dropped when the cap is exceeded.
 - **Auto-label** creates or uses a Gmail label and applies it to matching threads when results are computed.
 - **No send:** Sequel cannot compose or send mail on your behalf.

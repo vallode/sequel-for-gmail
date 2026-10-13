@@ -59,4 +59,5 @@ export interface FollowUpQueryResult {
   emails: PendingEmail[];
   threadsScanned: number;
   searchTruncated: boolean;
+  fetchedAt: Date;
 }

@@ -36,7 +36,9 @@ Automated tests do not cover Gmail. After `pnpm push` (or your tester deployment
 - [ ] With enough matching mail, confirm **truncation messaging** when results exceed UI/search limits
 - [ ] **Excluded domains** skip intended recipients
 - [ ] **Auto-label** applies (or creates) the configured label on matching threads
-- [ ] Re-open homepage within ~5 minutes without Save & Refresh; confirm **cache** behavior (stale until refresh path bypasses cache)
+- [ ] Re-open homepage within ~30 minutes; confirm **cache** behavior ("Updated X min ago" keeps counting, dismiss/sort don't rescan)
+- [ ] **Refresh** on the homepage refetches and resets the label to "Updated just now"
+- [ ] With **Auto-label** set, matching threads get the label
 
 ## Releases and dependency maintenance
 

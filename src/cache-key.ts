@@ -32,11 +32,13 @@ export function buildFollowUpCacheKey(settings: UserSettings): string {
 export interface CachedFollowUps {
   emails: PendingEmail[];
   searchTruncated: boolean;
+  fetchedAt: Date;
 }
 
 export function serializeCachedFollowUps(
   emails: PendingEmail[],
   searchTruncated: boolean,
+  fetchedAt: Date,
 ): string {
   const serialized: PendingEmailSerialized[] = emails.map((e) => ({
     threadId: e.threadId,
@@ -44,17 +46,23 @@ export function serializeCachedFollowUps(
     to: e.to,
     dateMs: e.date.getTime(),
   }));
-  return JSON.stringify({ emails: serialized, searchTruncated });
+  return JSON.stringify({
+    emails: serialized,
+    searchTruncated,
+    fetchedAtMs: fetchedAt.getTime(),
+  });
 }
 
-/** Returns null for malformed or legacy (bare array) payloads so callers refetch. */
+/** Returns null for malformed or legacy payloads (bare array, no fetch time) so callers refetch. */
 export function parseCachedFollowUps(raw: string): CachedFollowUps | null {
   try {
     const parsed = JSON.parse(raw) as {
       emails?: PendingEmailSerialized[];
       searchTruncated?: boolean;
+      fetchedAtMs?: number;
     };
     if (!parsed || !Array.isArray(parsed.emails)) return null;
+    if (!Number.isFinite(parsed.fetchedAtMs)) return null;
     return {
       emails: parsed.emails.map((e) => ({
         threadId: e.threadId,
@@ -63,6 +71,7 @@ export function parseCachedFollowUps(raw: string): CachedFollowUps | null {
         date: new Date(e.dateMs),
       })),
       searchTruncated: parsed.searchTruncated === true,
+      fetchedAt: new Date(parsed.fetchedAtMs as number),
     };
   } catch {
     return null;

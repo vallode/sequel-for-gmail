@@ -3,7 +3,11 @@ import {
   parseCachedFollowUps,
   serializeCachedFollowUps,
 } from "./cache-key.ts";
-import { CACHE_TTL_SECONDS, MAX_CACHE_VALUE_BYTES } from "./constants.ts";
+import {
+  CACHE_TTL_SECONDS,
+  LABEL_BATCH_SIZE,
+  MAX_CACHE_VALUE_BYTES,
+} from "./constants.ts";
 import { buildSearchQuery } from "./dates.ts";
 import { parseExcludedDomainList } from "./email-utils.ts";
 import { filterThreadsToPending, paginateSearch } from "./follow-ups-core.ts";
@@ -14,7 +18,7 @@ import type {
   ThreadInput,
   UserSettings,
 } from "./types.ts";
-import { perf } from "./util.ts";
+import { chunk, perf } from "./util.ts";
 
 function mapGmailThreads(
   threads: GoogleAppsScript.Gmail.GmailThread[],
@@ -35,9 +39,10 @@ function tryWriteCache(
   cacheKey: string,
   emails: PendingEmail[],
   searchTruncated: boolean,
+  fetchedAt: Date,
 ): void {
   try {
-    const payload = serializeCachedFollowUps(emails, searchTruncated);
+    const payload = serializeCachedFollowUps(emails, searchTruncated, fetchedAt);
     if (payload.length > MAX_CACHE_VALUE_BYTES) return;
     CacheService.getUserCache().put(cacheKey, payload, CACHE_TTL_SECONDS);
   } catch (err) {
@@ -66,6 +71,7 @@ export function getPendingFollowUps(
             emails: restored.emails,
             threadsScanned: 0,
             searchTruncated: restored.searchTruncated,
+            fetchedAt: restored.fetchedAt,
           };
         }
       }
@@ -76,6 +82,7 @@ export function getPendingFollowUps(
     }
   }
 
+  const fetchedAt = new Date();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - settings.days);
 
@@ -96,7 +103,7 @@ export function getPendingFollowUps(
     console.log(
       `[sequel] Gmail search failed: ${err instanceof Error ? err.message : "unknown"}`,
     );
-    return { emails: [], threadsScanned: 0, searchTruncated: false };
+    return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt };
   }
   perf(`GmailApp.search (${collected.length} threads)`, t1);
 
@@ -117,6 +124,7 @@ export function getPendingFollowUps(
       emails: [],
       threadsScanned: collected.length,
       searchTruncated,
+      fetchedAt,
     };
   }
   perf(`GmailApp.getMessagesForThreads (${collected.length} threads)`, t2);
@@ -136,8 +144,9 @@ export function getPendingFollowUps(
       let label = GmailApp.getUserLabelByName(settings.autoLabel);
       if (!label) label = GmailApp.createLabel(settings.autoLabel);
       const idSet = new Set(emails.map((e) => e.threadId));
-      for (const thread of collected) {
-        if (idSet.has(thread.getId())) thread.addLabel(label);
+      const toLabel = collected.filter((thread) => idSet.has(thread.getId()));
+      for (const batch of chunk(toLabel, LABEL_BATCH_SIZE)) {
+        label.addToThreads(batch);
       }
     } catch (err) {
       console.log(
@@ -146,7 +155,7 @@ export function getPendingFollowUps(
     }
   }
 
-  tryWriteCache(cacheKey, emails, searchTruncated);
+  tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
 
   perf(`getPendingFollowUps (${emails.length}/${collected.length} threads)`, t0);
 
@@ -154,5 +163,6 @@ export function getPendingFollowUps(
     emails,
     threadsScanned: collected.length,
     searchTruncated,
+    fetchedAt,
   };
 }
