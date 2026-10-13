@@ -1,10 +1,11 @@
 export interface UserSettings {
   days: number;
   excludeReplied: boolean;
-  autoLabel: string;
   excludedDomains: string;
   staleDays: number;
   excludeInternal: boolean;
+  autoFollowUpEnabled: boolean;
+  autoFollowUpSteps: AutoFollowUpStep[];
 }
 
 export interface PendingEmail {
@@ -60,3 +61,48 @@ export interface FollowUpQueryResult {
   threadsScanned: number;
   searchTruncated: boolean;
 }
+
+export interface AutoFollowUpStep {
+  /** Days to wait after the previous message the user sent (original or nudge) */
+  waitDays: number;
+  template: string;
+}
+
+export interface AutoFollowUpMessageInput extends ThreadMessageInput {
+  cc: string;
+  isDraft: boolean;
+}
+
+export interface AutoFollowUpThreadInput {
+  threadId: string;
+  messages: AutoFollowUpMessageInput[];
+}
+
+export interface AutoFollowUpOptions {
+  now: Date;
+  steps: AutoFollowUpStep[];
+  excludeInternal: boolean;
+  excludedDomainList: string[];
+  myEmail: string;
+  myDomain: string;
+}
+
+export type AutoFollowUpStopReason =
+  | "replied"
+  | "sequence-complete"
+  | "no-recipient"
+  | "excluded";
+
+export type AutoFollowUpWaitReason = "not-due" | "draft-pending";
+
+export type AutoFollowUpDecision =
+  | {
+      action: "draft";
+      threadId: string;
+      stepIndex: number;
+      to: string;
+      cc: string;
+      body: string;
+    }
+  | { action: "stop"; threadId: string; reason: AutoFollowUpStopReason }
+  | { action: "wait"; threadId: string; reason: AutoFollowUpWaitReason };

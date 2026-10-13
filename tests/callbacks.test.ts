@@ -14,7 +14,9 @@ function referencedCallbacks(): Set<string> {
   for (const file of readdirSync(join(root, "src"), { recursive: true })) {
     if (!String(file).endsWith(".ts")) continue;
     const source = readFileSync(join(root, "src", String(file)), "utf8");
-    for (const match of source.matchAll(/setFunctionName\(\s*"([^"]+)"/g)) {
+    for (const match of source.matchAll(
+      /(?:setFunctionName|newTrigger)\(\s*"([^"]+)"/g,
+    )) {
       names.add(match[1]);
     }
   }

@@ -17,7 +17,6 @@ export function buildFollowUpCachePayload(settings: UserSettings): string {
     settings.excludeReplied,
     settings.staleDays,
     settings.excludedDomains,
-    settings.autoLabel,
     settings.excludeInternal,
   ].join("|");
 }
