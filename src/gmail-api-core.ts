@@ -1,6 +1,7 @@
 import type { ThreadInput } from "./types.ts";
 
-const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
+/** Gmail's batch endpoint: many API calls in one multipart HTTP request. */
+export const GMAIL_BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1";
 
 /** Only the headers the follow-up filter reads; bodies are never fetched. */
 const METADATA_HEADERS = ["From", "To", "Subject"];
@@ -25,13 +26,65 @@ export interface ThreadMetadata {
   messageIds: string[];
 }
 
-export function buildThreadMetadataUrl(threadId: string): string {
+/** Request path for one thread's metadata, relative to the API host. */
+export function buildThreadMetadataPath(threadId: string): string {
   const params = [
     "format=metadata",
     ...METADATA_HEADERS.map((h) => `metadataHeaders=${h}`),
     `fields=${encodeURIComponent(THREAD_METADATA_FIELDS)}`,
   ];
-  return `${GMAIL_API_BASE}/threads/${encodeURIComponent(threadId)}?${params.join("&")}`;
+  return `/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?${params.join("&")}`;
+}
+
+/**
+ * multipart/mixed body for the batch endpoint: one GET per path, tagged with
+ * its index as Content-ID so responses can be matched back.
+ */
+export function buildBatchRequestBody(paths: string[], boundary: string): string {
+  const parts = paths.map(
+    (path, i) =>
+      `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <item-${i}>\r\n\r\nGET ${path}\r\n`,
+  );
+  return `${parts.join("\r\n")}\r\n--${boundary}--`;
+}
+
+export interface BatchPartResponse {
+  /** Index of the request this answers, from its Content-ID */
+  index: number;
+  status: number;
+  body: string;
+}
+
+/** Reads the multipart boundary from a Content-Type header, if present. */
+export function boundaryFromContentType(contentType: string): string | null {
+  const match = contentType.match(/boundary="?([^";]+)"?/i);
+  return match ? match[1] : null;
+}
+
+/**
+ * Splits a batch response into per-request status and body. Parts without a
+ * recognisable Content-ID or status line are skipped; callers treat requests
+ * with no matching part as failed.
+ */
+export function parseBatchResponse(
+  body: string,
+  boundary: string,
+): BatchPartResponse[] {
+  const results: BatchPartResponse[] = [];
+  const normalized = body.replace(/\r\n/g, "\n");
+  for (const part of normalized.split(`--${boundary}`)) {
+    const id = part.match(/^Content-ID:\s*<response-item-(\d+)>/im);
+    const status = part.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
+    if (!id || !status || status.index === undefined) continue;
+    const afterStatus = part.slice(status.index);
+    const bodyStart = afterStatus.indexOf("\n\n");
+    results.push({
+      index: Number(id[1]),
+      status: Number(status[1]),
+      body: bodyStart === -1 ? "" : afterStatus.slice(bodyStart + 2).trim(),
+    });
+  }
+  return results;
 }
 
 /** Header names are case-insensitive; returns "" when the header is absent. */

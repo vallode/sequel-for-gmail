@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { paginateTokenSearch, type TokenPage } from "../src/follow-ups-core.ts";
 import {
-  buildThreadMetadataUrl,
+  boundaryFromContentType,
+  buildBatchRequestBody,
+  buildThreadMetadataPath,
   describeHttpError,
   findHeader,
   isRetryableStatus,
+  parseBatchResponse,
   parseThreadMetadata,
 } from "../src/gmail-api-core.ts";
 
@@ -66,10 +69,8 @@ describe("paginateTokenSearch", () => {
 
 describe("thread metadata", () => {
   it("requests only metadata headers and needed fields", () => {
-    const url = buildThreadMetadataUrl("abc123");
-    assert.ok(
-      url.startsWith("https://gmail.googleapis.com/gmail/v1/users/me/threads/abc123?"),
-    );
+    const url = buildThreadMetadataPath("abc123");
+    assert.ok(url.startsWith("/gmail/v1/users/me/threads/abc123?"));
     assert.ok(url.includes("format=metadata"));
     for (const h of ["From", "To", "Subject"])
       assert.ok(url.includes(`metadataHeaders=${h}`));
@@ -139,5 +140,59 @@ describe("thread metadata", () => {
       describeHttpError(400, JSON.stringify({ error: { message: "x".repeat(500) } }))
         .length <= 200,
     );
+  });
+});
+
+describe("batch requests", () => {
+  it("builds one tagged GET part per path", () => {
+    const body = buildBatchRequestBody(["/a", "/b"], "XYZ");
+    assert.equal(
+      body,
+      "--XYZ\r\nContent-Type: application/http\r\nContent-ID: <item-0>\r\n\r\nGET /a\r\n" +
+        "\r\n--XYZ\r\nContent-Type: application/http\r\nContent-ID: <item-1>\r\n\r\nGET /b\r\n" +
+        "\r\n--XYZ--",
+    );
+  });
+
+  it("reads the boundary from a Content-Type header", () => {
+    assert.equal(
+      boundaryFromContentType("multipart/mixed; boundary=batch_abc"),
+      "batch_abc",
+    );
+    assert.equal(boundaryFromContentType('multipart/mixed; boundary="q"'), "q");
+    assert.equal(boundaryFromContentType("application/json"), null);
+  });
+
+  it("parses statuses and bodies, matching parts by Content-ID", () => {
+    const response = [
+      "--batch_abc",
+      "Content-Type: application/http",
+      "Content-ID: <response-item-1>",
+      "",
+      "HTTP/1.1 404 Not Found",
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      '{"error":{"code":404,"message":"Not Found"}}',
+      "--batch_abc",
+      "Content-Type: application/http",
+      "Content-ID: <response-item-0>",
+      "",
+      "HTTP/1.1 200 OK",
+      "Content-Type: application/json; charset=UTF-8",
+      "Vary: Origin",
+      "",
+      '{"id":"t1","messages":[]}',
+      "--batch_abc--",
+      "",
+    ].join("\r\n");
+    assert.deepEqual(parseBatchResponse(response, "batch_abc"), [
+      { index: 1, status: 404, body: '{"error":{"code":404,"message":"Not Found"}}' },
+      { index: 0, status: 200, body: '{"id":"t1","messages":[]}' },
+    ]);
+  });
+
+  it("skips parts without a Content-ID or status line", () => {
+    const response = "--b\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--";
+    assert.deepEqual(parseBatchResponse(response, "b"), []);
   });
 });

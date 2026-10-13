@@ -19,10 +19,10 @@ export const GMAIL_SEARCH_PAGE_SIZE = 100;
 /** Gmail API threads.list maxResults upper bound */
 export const GMAIL_API_LIST_PAGE_SIZE = 500;
 /**
- * Parallel threads.get requests per UrlFetchApp.fetchAll call. Each costs 10
- * Gmail API quota units, so 25 stays near the per-user rate limit.
+ * threads.get calls per Gmail batch request. Gmail allows 100 but recommends
+ * at most 50; larger batches are more likely to be rate limited.
  */
-export const THREAD_FETCH_BATCH_SIZE = 25;
+export const THREAD_FETCH_BATCH_SIZE = 50;
 /** Gmail API messages.batchModify accepts at most 1000 message IDs per call */
 export const MESSAGE_MODIFY_BATCH_SIZE = 1000;
 /** Pause before retrying rate-limited or failed threads.get requests */

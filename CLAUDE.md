@@ -33,7 +33,7 @@ Sequel is a Gmail add-on built on Google Apps Script (V8 runtime), written in Ty
 
 **State:** User settings via `PropertiesService.getUserProperties()`. Dismissed emails are stored as JSON under `dismissed_ids` (capped, lock-protected updates). Follow-up results cached ~30 minutes in `CacheService` with hashed keys; Save & Refresh and the homepage Refresh action bypass cache.
 
-**Core logic:** `getPendingFollowUps()` lists sent-thread IDs with `Gmail.Users.Threads.list` (bounded), fetches From/To/Subject/date for each in parallel via `UrlFetchApp.fetchAll` against the Gmail API (`format=metadata`, no bodies; `runtime/gmail-api.ts`), filters threads in `follow-ups-core.ts` (replies, domains, internal, stale window), and syncs the `Follow-ups/Waiting` label.
+**Core logic:** `getPendingFollowUps()` lists sent-thread IDs with `Gmail.Users.Threads.list` (bounded), fetches From/To/Subject/date for each through the Gmail batch endpoint (up to 50 `threads.get?format=metadata` calls per multipart request, sent together via `UrlFetchApp.fetchAll`; no bodies; `runtime/gmail-api.ts`), filters threads in `follow-ups-core.ts` (replies, domains, internal, stale window), and syncs the `Follow-ups/Waiting` label.
 
 **Labels:** Fixed, not user-configurable: `Follow-ups` parent with `Waiting`, `Auto`, `Done` children (`FOLLOWUP_LABELS` in `constants.ts`). `ensureFollowUpLabels()` in `runtime/labels.ts` creates missing ones parent-first.
 

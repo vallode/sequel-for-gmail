@@ -5,10 +5,14 @@ import {
 } from "../constants.ts";
 import { type PaginatedSearchResult, paginateTokenSearch } from "../follow-ups-core.ts";
 import {
-  buildThreadMetadataUrl,
+  boundaryFromContentType,
+  buildBatchRequestBody,
+  buildThreadMetadataPath,
   describeHttpError,
+  GMAIL_BATCH_URL,
   type GmailApiThread,
   isRetryableStatus,
+  parseBatchResponse,
   parseThreadMetadata,
   type ThreadMetadata,
 } from "../gmail-api-core.ts";
@@ -45,77 +49,105 @@ export interface ThreadMetadataResult {
   firstError?: string;
 }
 
-function fetchBatch(
-  ids: string[],
-  token: string,
-): ThreadMetadataResult & { retry: string[] } {
+type ThreadRound = ThreadMetadataResult & { retry: string[] };
+
+/**
+ * One round of fetches: thread IDs are grouped into Gmail batch requests
+ * (each carrying up to THREAD_FETCH_BATCH_SIZE threads.get calls) and the
+ * batch requests are sent together with UrlFetchApp.fetchAll.
+ */
+function fetchRound(ids: string[], token: string): ThreadRound {
+  const round: ThreadRound = { threads: [], retry: [], failed: 0 };
+
+  const record = (id: string, status: number, body: string) => {
+    if (status === 200) {
+      const parsed = parseThreadMetadata(JSON.parse(body) as GmailApiThread);
+      if (parsed) round.threads.push(parsed);
+      else round.failed++;
+    } else if (isRetryableStatus(status)) {
+      round.retry.push(id);
+    } else {
+      // 404 means the thread was deleted between search and fetch
+      if (status !== 404 && !round.firstError) {
+        round.firstError = describeHttpError(status, body);
+        log.warn("threads.get failed", undefined, { threadId: id, status });
+      }
+      round.failed++;
+    }
+  };
+
+  const groups = chunk(ids, THREAD_FETCH_BATCH_SIZE);
+  const boundary = `sequel_batch_${Date.now()}`;
+  const t0 = Date.now();
   const responses = UrlFetchApp.fetchAll(
-    ids.map((id) => ({
-      url: buildThreadMetadataUrl(id),
+    groups.map((group) => ({
+      url: GMAIL_BATCH_URL,
+      method: "post" as const,
+      contentType: `multipart/mixed; boundary=${boundary}`,
+      payload: buildBatchRequestBody(group.map(buildThreadMetadataPath), boundary),
       headers: { Authorization: `Bearer ${token}` },
       muteHttpExceptions: true,
     })),
   );
+  perf("threads.get batch requests", t0, {
+    requests: groups.length,
+    threads: ids.length,
+  });
 
-  const threads: ThreadMetadata[] = [];
-  const retry: string[] = [];
-  let failed = 0;
-  let firstError: string | undefined;
-  responses.forEach((res, i) => {
+  responses.forEach((res, g) => {
+    const group = groups[g];
     const status = res.getResponseCode();
-    if (status === 200) {
-      const parsed = parseThreadMetadata(
-        JSON.parse(res.getContentText()) as GmailApiThread,
-      );
-      if (parsed) threads.push(parsed);
-      else failed++;
-    } else if (isRetryableStatus(status)) {
-      retry.push(ids[i]);
-    } else {
-      // 404 means the thread was deleted between search and fetch
-      if (status !== 404 && !firstError) {
-        firstError = describeHttpError(status, res.getContentText());
-        log.warn("threads.get failed", undefined, { threadId: ids[i], status });
-      }
-      failed++;
+    const text = res.getContentText();
+    if (status !== 200) {
+      // The whole batch request failed, so every thread in it did
+      for (const id of group) record(id, status, text);
+      return;
+    }
+
+    const headers = res.getHeaders() as Record<string, string>;
+    const contentType = headers["Content-Type"] ?? headers["content-type"] ?? "";
+    const responseBoundary =
+      boundaryFromContentType(contentType) ?? text.match(/^--(\S+)/)?.[1] ?? null;
+    const parts = responseBoundary ? parseBatchResponse(text, responseBoundary) : [];
+
+    const answered = new Set<number>();
+    for (const part of parts) {
+      const id = group[part.index];
+      if (id === undefined || answered.has(part.index)) continue;
+      answered.add(part.index);
+      record(id, part.status, part.body);
+    }
+    const missing = group.length - answered.size;
+    if (missing > 0) {
+      round.failed += missing;
+      round.firstError ??= "Gmail batch response was missing results";
+      log.warn("batch response missing parts", undefined, { missing });
     }
   });
-  return { threads, retry, failed, firstError };
+
+  return round;
 }
 
 /**
  * Fetches From/To/Subject/date for each thread via the Gmail API (metadata
- * format, no bodies), issuing requests in parallel batches. Rate-limited or
- * 5xx requests are retried once after a short pause.
+ * format, no bodies) using batch requests. Rate-limited or 5xx calls are
+ * retried once after a short pause.
  */
 export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
   const token = ScriptApp.getOAuthToken();
-  const threads: ThreadMetadata[] = [];
-  const retry: string[] = [];
-  let failed = 0;
-  let firstError: string | undefined;
+  const first = fetchRound(threadIds, token);
+  const threads = first.threads;
+  let failed = first.failed;
+  let firstError = first.firstError;
 
-  for (const batch of chunk(threadIds, THREAD_FETCH_BATCH_SIZE)) {
-    const tb = Date.now();
-    const result = fetchBatch(batch, token);
-    perf("threads.get batch", tb, { size: batch.length, retry: result.retry.length });
-    threads.push(...result.threads);
-    retry.push(...result.retry);
-    failed += result.failed;
-    firstError ??= result.firstError;
-  }
-
-  if (retry.length > 0) {
-    log.warn("retrying threads.get requests", undefined, { count: retry.length });
+  if (first.retry.length > 0) {
+    log.warn("retrying threads.get requests", undefined, { count: first.retry.length });
     Utilities.sleep(THREAD_FETCH_RETRY_DELAY_MS);
-    for (const batch of chunk(retry, THREAD_FETCH_BATCH_SIZE)) {
-      const result = fetchBatch(batch, token);
-      threads.push(...result.threads);
-      failed += result.failed + result.retry.length;
-      firstError ??= result.firstError;
-      if (result.retry.length > 0)
-        firstError ??= "Gmail API rate limit or server error";
-    }
+    const second = fetchRound(first.retry, token);
+    threads.push(...second.threads);
+    failed += second.failed + second.retry.length;
+    firstError ??= second.firstError;
+    if (second.retry.length > 0) firstError ??= "Gmail API rate limit or server error";
   }
 
   return { threads, failed, firstError };
