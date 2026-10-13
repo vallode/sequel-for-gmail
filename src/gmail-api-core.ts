@@ -1,24 +1,36 @@
-import type { ThreadInput } from "./types.ts";
+import type { AutoFollowUpThreadInput, ThreadInput } from "./types.ts";
 
 /** Gmail's batch endpoint: many API calls in one multipart HTTP request. */
 export const GMAIL_BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1";
 
-/** Only the headers the follow-up filter reads; bodies are never fetched. */
-const METADATA_HEADERS = ["From", "To", "Subject"];
-const THREAD_METADATA_FIELDS = "id,messages(id,internalDate,payload/headers)";
+/** Headers the follow-up filter reads; bodies are never fetched. */
+export const FOLLOW_UP_HEADERS = ["From", "To", "Subject"] as const;
+/** Headers the auto follow-up runner reads, including what a threaded reply needs. */
+export const AUTO_FOLLOWUP_HEADERS = [
+  "From",
+  "To",
+  "Cc",
+  "Subject",
+  "Message-ID",
+  "References",
+] as const;
+const THREAD_METADATA_FIELDS = "id,messages(id,internalDate,labelIds,payload/headers)";
 
 export interface GmailApiHeader {
   name?: string;
   value?: string;
 }
 
+export interface GmailApiMessage {
+  id?: string;
+  internalDate?: string;
+  labelIds?: string[];
+  payload?: { headers?: GmailApiHeader[] };
+}
+
 export interface GmailApiThread {
   id?: string;
-  messages?: Array<{
-    id?: string;
-    internalDate?: string;
-    payload?: { headers?: GmailApiHeader[] };
-  }>;
+  messages?: GmailApiMessage[];
 }
 
 export interface ThreadMetadata {
@@ -27,10 +39,13 @@ export interface ThreadMetadata {
 }
 
 /** Request path for one thread's metadata, relative to the API host. */
-export function buildThreadMetadataPath(threadId: string): string {
+export function buildThreadMetadataPath(
+  threadId: string,
+  headers: readonly string[] = FOLLOW_UP_HEADERS,
+): string {
   const params = [
     "format=metadata",
-    ...METADATA_HEADERS.map((h) => `metadataHeaders=${h}`),
+    ...headers.map((h) => `metadataHeaders=${h}`),
     `fields=${encodeURIComponent(THREAD_METADATA_FIELDS)}`,
   ];
   return `/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?${params.join("&")}`;
@@ -112,6 +127,41 @@ export function parseThreadMetadata(raw: GmailApiThread): ThreadMetadata | null 
       })),
     },
     messageIds: messages.map((msg) => msg.id).filter((id): id is string => !!id),
+  };
+}
+
+export interface AutoFollowUpThreadMetadata {
+  thread: AutoFollowUpThreadInput;
+  /** Headers of the last message, for threading a reply to it */
+  replyTo: { messageId: string; references: string };
+}
+
+/**
+ * Runner input for one flagged thread. Trashed messages are dropped (Gmail
+ * still returns them in threads.get) and DRAFT-labelled ones are marked.
+ */
+export function parseAutoFollowUpThread(
+  raw: GmailApiThread,
+): AutoFollowUpThreadMetadata | null {
+  if (!raw.id) return null;
+  const messages = (raw.messages ?? []).filter((m) => !m.labelIds?.includes("TRASH"));
+  const lastHeaders = messages[messages.length - 1]?.payload?.headers;
+  return {
+    thread: {
+      threadId: raw.id,
+      messages: messages.map((msg) => ({
+        from: findHeader(msg.payload?.headers, "From"),
+        to: findHeader(msg.payload?.headers, "To"),
+        cc: findHeader(msg.payload?.headers, "Cc"),
+        date: new Date(Number(msg.internalDate ?? 0)),
+        subject: findHeader(msg.payload?.headers, "Subject"),
+        isDraft: msg.labelIds?.includes("DRAFT") ?? false,
+      })),
+    },
+    replyTo: {
+      messageId: findHeader(lastHeaders, "Message-ID"),
+      references: findHeader(lastHeaders, "References"),
+    },
   };
 }
 

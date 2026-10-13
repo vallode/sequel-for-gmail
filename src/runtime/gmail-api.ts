@@ -5,13 +5,17 @@ import {
 } from "../constants.ts";
 import { type PaginatedSearchResult, paginateTokenSearch } from "../follow-ups-core.ts";
 import {
+  AUTO_FOLLOWUP_HEADERS,
+  type AutoFollowUpThreadMetadata,
   boundaryFromContentType,
   buildBatchRequestBody,
   buildThreadMetadataPath,
   describeHttpError,
+  FOLLOW_UP_HEADERS,
   GMAIL_BATCH_URL,
   type GmailApiThread,
   isRetryableStatus,
+  parseAutoFollowUpThread,
   parseBatchResponse,
   parseThreadMetadata,
   type ThreadMetadata,
@@ -41,31 +45,45 @@ export function searchThreadIds(query: string): PaginatedSearchResult<string> {
   });
 }
 
-export interface ThreadMetadataResult {
-  threads: ThreadMetadata[];
+export interface ThreadFetchResult<T> {
+  threads: T[];
   /** Threads that still failed after the last retry */
   failed: number;
   /** First failure description, for logs and the error card */
   firstError?: string;
 }
 
-type ThreadRound = ThreadMetadataResult & {
+type ThreadRound<T> = ThreadFetchResult<T> & {
   retry: string[];
   /** Count of retryable responses by HTTP status, for logs */
   retryStatuses: Record<number, number>;
 };
+
+interface ThreadFetchSpec<T> {
+  headers: readonly string[];
+  parse: (raw: GmailApiThread) => T | null;
+}
 
 /**
  * One round of fetches: thread IDs are grouped into Gmail batch requests
  * (each carrying up to THREAD_FETCH_BATCH_SIZE threads.get calls) and the
  * batch requests are sent together with UrlFetchApp.fetchAll.
  */
-function fetchRound(ids: string[], token: string): ThreadRound {
-  const round: ThreadRound = { threads: [], retry: [], failed: 0, retryStatuses: {} };
+function fetchRound<T>(
+  ids: string[],
+  token: string,
+  spec: ThreadFetchSpec<T>,
+): ThreadRound<T> {
+  const round: ThreadRound<T> = {
+    threads: [],
+    retry: [],
+    failed: 0,
+    retryStatuses: {},
+  };
 
   const record = (id: string, status: number, body: string) => {
     if (status === 200) {
-      const parsed = parseThreadMetadata(JSON.parse(body) as GmailApiThread);
+      const parsed = spec.parse(JSON.parse(body) as GmailApiThread);
       if (parsed) round.threads.push(parsed);
       else round.failed++;
     } else if (isRetryableStatus(status)) {
@@ -88,7 +106,10 @@ function fetchRound(ids: string[], token: string): ThreadRound {
       url: GMAIL_BATCH_URL,
       method: "post" as const,
       contentType: `multipart/mixed; boundary=${boundary}`,
-      payload: buildBatchRequestBody(group.map(buildThreadMetadataPath), boundary),
+      payload: buildBatchRequestBody(
+        group.map((id) => buildThreadMetadataPath(id, spec.headers)),
+        boundary,
+      ),
       headers: { Authorization: `Bearer ${token}` },
       muteHttpExceptions: true,
     })),
@@ -129,13 +150,17 @@ function fetchRound(ids: string[], token: string): ThreadRound {
 }
 
 /**
- * Fetches From/To/Subject/date for each thread via the Gmail API (metadata
- * format, no bodies) using batch requests. Rate-limited or 5xx calls are
- * retried after each delay in THREAD_FETCH_RETRY_DELAYS_MS.
+ * Fetches thread metadata (the spec's headers plus dates and label IDs, no
+ * bodies) via Gmail batch requests. Rate-limited or 5xx calls are retried
+ * after each delay in THREAD_FETCH_RETRY_DELAYS_MS.
  */
-export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
+function fetchThreads<T>(
+  threadIds: string[],
+  spec: ThreadFetchSpec<T>,
+): ThreadFetchResult<T> {
+  if (threadIds.length === 0) return { threads: [], failed: 0 };
   const token = ScriptApp.getOAuthToken();
-  let round = fetchRound(threadIds, token);
+  let round = fetchRound(threadIds, token, spec);
   const threads = round.threads;
   let failed = round.failed;
   let firstError = round.firstError;
@@ -148,7 +173,7 @@ export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
       delayMs,
     });
     Utilities.sleep(delayMs);
-    round = fetchRound(round.retry, token);
+    round = fetchRound(round.retry, token, spec);
     threads.push(...round.threads);
     failed += round.failed;
     firstError ??= round.firstError;
@@ -159,6 +184,26 @@ export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
   }
 
   return { threads, failed, firstError };
+}
+
+/** From/To/Subject/date for the follow-up list. */
+export function fetchThreadMetadata(
+  threadIds: string[],
+): ThreadFetchResult<ThreadMetadata> {
+  return fetchThreads(threadIds, {
+    headers: FOLLOW_UP_HEADERS,
+    parse: parseThreadMetadata,
+  });
+}
+
+/** Sender, recipients, draft/trash state and reply headers for flagged threads. */
+export function fetchAutoFollowUpThreads(
+  threadIds: string[],
+): ThreadFetchResult<AutoFollowUpThreadMetadata> {
+  return fetchThreads(threadIds, {
+    headers: AUTO_FOLLOWUP_HEADERS,
+    parse: parseAutoFollowUpThread,
+  });
 }
 
 const labelIds = new Map<string, string>();
@@ -184,7 +229,7 @@ export function listThreadIdsWithLabel(
   labelName: string,
 ): PaginatedSearchResult<string> {
   const labelId = getLabelId(labelName);
-  return paginateTokenSearch((pageToken, maxResults) => {
+  const result = paginateTokenSearch((pageToken, maxResults) => {
     const args: { labelIds: string[]; maxResults: number; pageToken?: string } = {
       labelIds: [labelId],
       maxResults,
@@ -196,6 +241,8 @@ export function listThreadIdsWithLabel(
       nextPageToken: res.nextPageToken,
     };
   });
+  if (result.truncated) log.warn("label listing truncated", { label: labelName });
+  return result;
 }
 
 /** Labels messages in bulk; `labelName` must already exist. */
@@ -207,11 +254,30 @@ export function addLabelToMessages(labelName: string, messageIds: string[]): voi
   }
 }
 
+/** Adds and removes labels on one thread in a single call; labels must exist. */
+export function modifyThreadLabels(
+  threadId: string,
+  change: { add?: string[]; remove?: string[] },
+): void {
+  gmailApi().Users.Threads.modify(
+    {
+      addLabelIds: (change.add ?? []).map(getLabelId),
+      removeLabelIds: (change.remove ?? []).map(getLabelId),
+    },
+    "me",
+    threadId,
+  );
+}
+
 /** Removes a label from whole threads; usually only a few per refresh. */
 export function removeLabelFromThreadIds(labelName: string, threadIds: string[]): void {
-  if (threadIds.length === 0) return;
-  const labelId = getLabelId(labelName);
-  for (const id of threadIds) {
-    gmailApi().Users.Threads.modify({ removeLabelIds: [labelId] }, "me", id);
-  }
+  for (const id of threadIds) modifyThreadLabels(id, { remove: [labelName] });
+}
+
+/** Saves a raw RFC 2822 message as a draft in the thread. Never sends. */
+export function createThreadDraft(threadId: string, mime: string): void {
+  gmailApi().Users.Drafts.create(
+    { message: { raw: Utilities.base64EncodeWebSafe(mime), threadId } },
+    "me",
+  );
 }

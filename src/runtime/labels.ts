@@ -1,7 +1,5 @@
 import { FOLLOWUP_LABELS } from "../constants.ts";
-import { paginateSearch } from "../follow-ups-core.ts";
 import { missingLabelNames } from "../labels-core.ts";
-import { log } from "../log.ts";
 
 export interface FollowUpLabels {
   waiting: GoogleAppsScript.Gmail.GmailLabel;
@@ -29,14 +27,4 @@ export function ensureFollowUpLabels(): FollowUpLabels {
   const [, waiting, auto, done] = FOLLOWUP_LABELS;
   resolved = { waiting: get(waiting), auto: get(auto), done: get(done) };
   return resolved;
-}
-
-export function listLabelThreads(
-  label: GoogleAppsScript.Gmail.GmailLabel,
-): GoogleAppsScript.Gmail.GmailThread[] {
-  const { items, truncated } = paginateSearch((start, max) =>
-    label.getThreads(start, max),
-  );
-  if (truncated) log.warn("label threads truncated", { label: label.getName() });
-  return items.filter((thread) => !thread.isInTrash());
 }

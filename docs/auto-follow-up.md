@@ -50,16 +50,19 @@ user restarts the sequence.
 - Global `_runAutoFollowUps`. Export it from `src/entry.ts` and list it in
   `scripts/global-callbacks.json`.
 - `LockService.getUserLock()` so overlapping runs can't create duplicate drafts.
-- List threads with `label.getThreads` via `paginateSearch`, skipping trashed
-  threads and messages. This avoids quoting nested label names in search syntax.
+- List flagged thread IDs with `Gmail.Users.Threads.list` by label ID (skips
+  trashed threads; avoids quoting nested label names in search syntax).
 - Bail out if the user's email can't be resolved; otherwise every message looks self-sent.
-- Map messages including `getCc()` and `isDraft()`.
+- Fetch the threads through the Gmail batch endpoint (`fetchAutoFollowUpThreads`,
+  `format=metadata`) with From/To/Cc/Subject/Message-ID/References and label IDs:
+  `TRASH` messages are dropped, `DRAFT` ones are marked `isDraft`. Threads that
+  fail to fetch count as `failed` and are retried on the next hourly run.
 - Create the draft with the **Advanced Gmail Service** (`Gmail.Users.Drafts.create`)
   as raw MIME: To/Cc from the decision, `Subject: Re: …`, `In-Reply-To` and
   `References` set to the last message's `Message-ID`, and `threadId`. Avoid
   `GmailMessage.createDraftReply`: replying to your own sent message addresses
   the draft to yourself, and the method needs the full `mail.google.com` scope.
-- On `stop`, swap the labels. Log every decision with `[sequel]` prefixes.
+- On `stop`, swap the labels with one `Threads.modify`. Log every decision with `[sequel]` prefixes.
 - Cap drafts per run (e.g. 20) to stay inside Apps Script execution time.
 
 ## Trigger lifecycle
@@ -98,7 +101,8 @@ domains and the internal-recipient setting reuse the existing settings.
 
 ## Known adjacent issue
 
-`GmailThread.getMessages()` includes drafts. The existing `evaluateThreadForFollowUp`
+`threads.get` includes drafts. The existing `evaluateThreadForFollowUp`
 doesn't filter them, so an open draft at the end of a thread is treated as a
 sent message (wrong date, and a replied thread can look unanswered). This is
-worth fixing alongside the runner, since both need `isDraft()`.
+worth fixing: the follow-up list fetch already receives label IDs, so it can
+skip `DRAFT` messages the same way the runner does.

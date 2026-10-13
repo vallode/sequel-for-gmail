@@ -37,7 +37,6 @@ function syncWaitingLabel(
 ): { labelled: number; added: number; removed: number } {
   ensureFollowUpLabels();
   const labelled = listThreadIdsWithLabel(FOLLOWUP_WAITING_LABEL);
-  if (labelled.truncated) log.warn("waiting label listing truncated");
   const changes = diffLabelMembership(
     new Set(emails.map((e) => e.threadId)),
     new Set(labelled.items),
