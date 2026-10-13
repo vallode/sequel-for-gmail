@@ -41,13 +41,6 @@ export function listLabelThreads(
   return items.filter((thread) => !thread.isInTrash());
 }
 
-export function addLabelToThreads(
-  label: GoogleAppsScript.Gmail.GmailLabel,
-  threads: GoogleAppsScript.Gmail.GmailThread[],
-): void {
-  for (const batch of chunk(threads, LABEL_BATCH_SIZE)) label.addToThreads(batch);
-}
-
 export function removeLabelFromThreads(
   label: GoogleAppsScript.Gmail.GmailLabel,
   threads: GoogleAppsScript.Gmail.GmailThread[],

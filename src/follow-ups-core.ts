@@ -1,4 +1,8 @@
-import { GMAIL_SEARCH_PAGE_SIZE, MAX_THREADS_TO_SCAN } from "./constants.ts";
+import {
+  GMAIL_API_LIST_PAGE_SIZE,
+  GMAIL_SEARCH_PAGE_SIZE,
+  MAX_THREADS_TO_SCAN,
+} from "./constants.ts";
 import {
   getEmailDomain,
   isAnyDomainExcluded,
@@ -102,6 +106,30 @@ export function paginateSearch<T>(
     start += size;
   }
   return { items, truncated: search(start, 1).length > 0 };
+}
+
+export interface TokenPage<T> {
+  items: T[];
+  nextPageToken?: string;
+}
+
+/**
+ * Page-token variant of `paginateSearch` for the Gmail API. Collects one item
+ * past `maxItems` so `truncated` is only set if more results actually exist.
+ */
+export function paginateTokenSearch<T>(
+  fetchPage: (pageToken: string | undefined, max: number) => TokenPage<T>,
+  pageSize: number = GMAIL_API_LIST_PAGE_SIZE,
+  maxItems: number = MAX_THREADS_TO_SCAN,
+): PaginatedSearchResult<T> {
+  const items: T[] = [];
+  let pageToken: string | undefined;
+  do {
+    const page = fetchPage(pageToken, Math.min(pageSize, maxItems + 1 - items.length));
+    items.push(...page.items);
+    pageToken = page.nextPageToken;
+  } while (pageToken && items.length <= maxItems);
+  return { items: items.slice(0, maxItems), truncated: items.length > maxItems };
 }
 
 export function filterThreadsToPending(

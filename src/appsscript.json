@@ -15,7 +15,8 @@
     "https://www.googleapis.com/auth/gmail.addons.execute",
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/script.scriptapp"
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/script.external_request"
   ],
   "addOns": {
     "common": {
@@ -23,7 +24,8 @@
       "logoUrl": "https://raw.githubusercontent.com/vallode/sequel-for-gmail/main/assets/logo.png",
       "layoutProperties": {
         "primaryColor": "#c2e7ff"
-      }
+      },
+      "urlFetchWhitelist": ["https://gmail.googleapis.com/"]
     },
     "gmail": {
       "homepageTrigger": {

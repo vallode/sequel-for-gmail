@@ -42,6 +42,8 @@ Automated tests do not cover Gmail. After `pnpm push` (or your tester deployment
 - [ ] Disable auto follow-up and save; the trigger is removed
 - [ ] Re-open homepage within ~30 minutes; confirm **cache** behavior ("Updated X min ago" keeps counting, dismiss/sort don't rescan)
 - [ ] **Refresh** on the homepage refetches and resets the label to "Updated just now"
+- [ ] After deploying a scope change, the add-on asks you to re-authorize and then loads normally
+- [ ] Logs show `threads.get metadata (N threads)` timings and no repeated `retrying` lines on a normal load
 
 ## Releases and dependency maintenance
 
