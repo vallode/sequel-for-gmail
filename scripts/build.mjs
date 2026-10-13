@@ -15,8 +15,9 @@ const GLOBAL_CALLBACKS = JSON.parse(
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
+// Each callback is wrapped so uncaught errors are logged with a stack trace.
 const footer = GLOBAL_CALLBACKS.map(
-  (name) => `globalThis.${name} = Sequel.${name};`,
+  (name) => `globalThis.${name} = Sequel.withLogging("${name}", Sequel.${name});`,
 ).join("\n");
 
 await esbuild.build({
