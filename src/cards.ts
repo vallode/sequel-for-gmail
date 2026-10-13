@@ -339,17 +339,24 @@ export function buildHomepageCard(
   const t0 = Date.now();
   requireFullAuthorization();
   perf("requireFullAuthorization", t0);
+  let step = Date.now();
   const settings = readUserSettings();
+  perf("homepage: readUserSettings", step);
   const { emails, searchTruncated, fetchedAt, error } = getPendingFollowUps(
     settings,
     ignoreCache,
   );
+  step = Date.now();
   const sortAsc =
     PropertiesService.getUserProperties().getProperty("sort_order") !== "desc";
+  perf("homepage: read sort order", step);
 
+  step = Date.now();
   const dismissed = dismissedThreadIds(readDismissedList());
   const visibleEmails = emails.filter((e) => !dismissed.has(e.threadId));
+  perf("homepage: read dismissed list", step, { dismissed: dismissed.size });
 
+  step = Date.now();
   const card = CardService.newCardBuilder()
     .addCardAction(
       CardService.newCardAction()
@@ -372,6 +379,7 @@ export function buildHomepageCard(
             .setOpenAs(CardService.OpenAs.FULL_SIZE),
         ),
     );
+  perf("homepage: card actions", step);
 
   let autoFollowUpThreadIds: Set<string> | null = null;
   if (settings.autoFollowUpEnabled) {
@@ -388,6 +396,7 @@ export function buildHomepageCard(
     );
   }
 
+  step = Date.now();
   card.addSection(
     buildResultsSection(
       visibleEmails,
@@ -399,10 +408,18 @@ export function buildHomepageCard(
       error,
     ),
   );
+  perf("homepage: results section", step, { visible: visibleEmails.length });
+
+  step = Date.now();
   card.addSection(buildCatSection());
+  perf("homepage: cat section", step);
+
+  step = Date.now();
+  const built = card.build();
+  perf("homepage: card.build", step);
 
   perf("_buildHomepage", t0, { visible: visibleEmails.length });
-  return card.build();
+  return built;
 }
 
 export function buildDismissedCard(): GoogleAppsScript.Card_Service.Card {

@@ -35,7 +35,9 @@ function syncWaitingLabel(
   emails: PendingEmail[],
   searchTruncated: boolean,
 ): void {
+  const te = Date.now();
   ensureFollowUpLabels();
+  perf("ensureFollowUpLabels", te);
   const t0 = Date.now();
   const labelled = listThreadIdsWithLabel(FOLLOWUP_WAITING_LABEL);
   perf("listThreadIdsWithLabel", t0, {
@@ -126,9 +128,11 @@ export function getPendingFollowUps(
   }
   perf("Threads.list", t1, { threads: threadIds.length, searchTruncated });
 
+  const tu = Date.now();
   const myEmail = getMyEmail();
   const myDomain = getMyDomain();
   const domainList = parseExcludedDomainList(settings.excludedDomains);
+  perf("getMyEmail", tu);
 
   let scanned: ThreadMetadata[] = [];
   let fetchFailed = 0;
@@ -191,7 +195,9 @@ export function getPendingFollowUps(
   perf("syncWaitingLabel", t3);
 
   // A partial fetch is worth showing but not caching; the next load retries it
+  const tc = Date.now();
   if (fetchFailed === 0) tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
+  perf("tryWriteCache", tc);
 
   perf("getPendingFollowUps", t0, {
     pending: emails.length,
