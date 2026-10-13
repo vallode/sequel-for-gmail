@@ -1,0 +1,41 @@
+name: Bug report
+description: Something is wrong in Gmail or the add-on UI
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security issues: see [SECURITY.md](https://github.com/vallode/sequel-for-gmail/blob/main/SECURITY.md) — do not file public bugs for vulnerabilities.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What you expected vs what you saw.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Sequel in Gmail
+        2. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Deployment / version (if known)
+      placeholder: clasp deployment id or date pushed
+
+  - type: dropdown
+    id: account
+    attributes:
+      label: Account type
+      options:
+        - Personal Gmail
+        - Google Workspace
+        - Not sure

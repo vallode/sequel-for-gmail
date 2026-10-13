@@ -5,27 +5,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-deno task build    # Compile TypeScript → build/
-deno task push     # Build + push to Google Apps Script
-deno task deploy   # Build + push + create new deployment
-deno task pull     # Pull latest from Google Apps Script
-deno task open     # Open the script in browser
+pnpm install     # Install dev dependencies (Corepack uses packageManager pin)
+pnpm build       # Bundle TypeScript → build/Code.js + copy appsscript.json
+pnpm typecheck   # tsc --noEmit
+pnpm lint        # biome check .
+pnpm format      # biome format --write .
+pnpm test        # Node built-in test runner (pure logic under tests/)
+pnpm check       # lint/format check + typecheck + test + build
+pnpm push        # Build + clasp push
+pnpm deploy      # Build + push + clasp deploy
+pnpm pull        # Pull latest from Google Apps Script
+pnpm open        # Open the script in browser
 ```
 
-There are no automated tests. Validation is done by deploying and testing manually in Gmail.
+Validation combines automated tests for pure logic with manual Gmail add-on testing after deploy.
 
 ## Architecture
 
-Sequel is a Gmail add-on built on Google Apps Script (V8 runtime), written in TypeScript and deployed via `clasp`. The entire application lives in `src/Code.ts`.
+Sequel is a Gmail add-on built on Google Apps Script (V8 runtime), written in TypeScript and deployed via `clasp`. Source lives under `src/` as ES modules; `scripts/build.mjs` uses esbuild to produce a single global-scope `build/Code.js` because Apps Script cannot load ES modules at runtime.
 
-**Build pipeline:** TypeScript → `tsc` → `build/Code.js` + `build/appsscript.json` → `clasp push` → Google Apps Script.
+**Build pipeline:** TypeScript modules → esbuild (IIFE + `globalThis` exports) → `build/Code.js` + `build/appsscript.json` → `clasp push` → Google Apps Script.
 
-**Runtime:** All code runs inside Google Apps Script — no Node.js, no bundler, no modules. All functions must be globally scoped to be callable by the Card Service framework. Interfaces and types are compile-time only.
+**Runtime:** All Card Service entry points and `_on*` handlers must exist as global functions on `globalThis` in the deployed bundle. Interfaces and types are compile-time only.
 
-**UI:** Built with the Google Card Service API. Cards are returned from entry point functions declared in `src/appsscript.json` (`buildSettingsCard`, `_buildHomepage`, `buildDismissedCard`).
+**UI:** Google Card Service API. Entry functions declared in `src/appsscript.json`: `_buildHomepage`, `buildSettingsCard`, `buildDismissedCard`.
 
-**State:** User settings are persisted via `PropertiesService.getUserProperties()` (key-value string store). Dismissed emails are stored as a JSON array under the `dismissed_emails` property key. Results are cached for 5 minutes using `CacheService`.
+**State:** User settings via `PropertiesService.getUserProperties()`. Dismissed emails are stored as JSON under `dismissed_ids` (capped, lock-protected updates). Follow-up results cached ~5 minutes in `CacheService` with hashed keys; Save & Refresh bypasses cache.
 
-**Core logic:** `getPendingFollowUps()` queries Gmail for sent threads older than N days, then filters out threads that have replies, match excluded domains, match an auto-label, are internal, or exceed the stale cutoff.
+**Core logic:** `getPendingFollowUps()` paginates Gmail sent-thread search (bounded), filters threads in `follow-ups-core.ts` (replies, domains, internal, stale window), optionally auto-labels.
 
-**Action handlers:** Functions prefixed with `_on` (e.g. `_onSaveSettings`, `_onDismiss`) are registered as Card Service action callbacks. They must be globally accessible.
+**OAuth scopes:** `gmail.addons.execute` (add-on runtime), `gmail.modify` (search threads and apply labels — covers all `GmailApp` usage), `userinfo.email` (`Session.getActiveUser().getEmail()`). Removed `gmail.readonly` (redundant with modify) and `script.scriptapp` (no Script Apps API usage).
+
+**Action handlers:** Functions prefixed with `_on` or `_open` are Card Service callbacks and must remain globally accessible in the bundle.
