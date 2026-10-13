@@ -17,17 +17,6 @@ import type { AutoFollowUpStep, UserSettings } from "./types.ts";
 
 export type SettingsPropertyBag = Record<string, string | null | undefined>;
 
-/** Property keys read by `parseSettingsFromProperties` */
-export const SETTINGS_PROPERTY_KEYS = [
-  "followup_days",
-  "stale_days",
-  "exclude_replied",
-  "exclude_internal",
-  "excluded_domains",
-  "auto_followup_enabled",
-  AUTO_FOLLOWUP_STEPS_PROPERTY_KEY,
-] as const;
-
 function parsePositiveInt(raw: string | null | undefined, fallback: number): number {
   if (raw == null || raw.trim() === "") return fallback;
   const n = Number.parseInt(raw, 10);

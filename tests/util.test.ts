@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { formatUpdatedLabel } from "../src/dates.ts";
-import { chunk } from "../src/util.ts";
+import { chunk, escapeHtml } from "../src/util.ts";
 
 describe("chunk", () => {
   it("splits into batches with a shorter final batch", () => {
@@ -27,5 +27,11 @@ describe("formatUpdatedLabel", () => {
       formatUpdatedLabel(fetchedAt, after(29 * 60_000)),
       "Updated 29 min ago",
     );
+  });
+});
+
+describe("escapeHtml", () => {
+  it("escapes markup characters", () => {
+    assert.equal(escapeHtml("a < b && c > d"), "a &lt; b &amp;&amp; c &gt; d");
   });
 });

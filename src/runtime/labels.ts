@@ -1,8 +1,7 @@
-import { FOLLOWUP_LABELS, LABEL_BATCH_SIZE } from "../constants.ts";
+import { FOLLOWUP_LABELS } from "../constants.ts";
 import { paginateSearch } from "../follow-ups-core.ts";
 import { missingLabelNames } from "../labels-core.ts";
 import { log } from "../log.ts";
-import { chunk } from "../util.ts";
 
 export interface FollowUpLabels {
   waiting: GoogleAppsScript.Gmail.GmailLabel;
@@ -40,18 +39,4 @@ export function listLabelThreads(
   );
   if (truncated) log.warn("label threads truncated", { label: label.getName() });
   return items.filter((thread) => !thread.isInTrash());
-}
-
-export function addLabelToThreads(
-  label: GoogleAppsScript.Gmail.GmailLabel,
-  threads: GoogleAppsScript.Gmail.GmailThread[],
-): void {
-  for (const batch of chunk(threads, LABEL_BATCH_SIZE)) label.addToThreads(batch);
-}
-
-export function removeLabelFromThreads(
-  label: GoogleAppsScript.Gmail.GmailLabel,
-  threads: GoogleAppsScript.Gmail.GmailThread[],
-): void {
-  for (const batch of chunk(threads, LABEL_BATCH_SIZE)) label.removeFromThreads(batch);
 }

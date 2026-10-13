@@ -16,13 +16,24 @@ export const MAX_CACHE_KEY_LENGTH = 250;
 
 /** Gmail search page size */
 export const GMAIL_SEARCH_PAGE_SIZE = 100;
+/** Gmail API threads.list maxResults upper bound */
+export const GMAIL_API_LIST_PAGE_SIZE = 500;
+/**
+ * threads.get calls per Gmail batch request. Gmail allows 100 but recommends
+ * at most 50; larger batches are more likely to be rate limited.
+ */
+export const THREAD_FETCH_BATCH_SIZE = 50;
+/** Gmail API messages.batchModify accepts at most 1000 message IDs per call */
+export const MESSAGE_MODIFY_BATCH_SIZE = 1000;
+/**
+ * Pauses before each retry round for rate-limited or 5xx threads.get calls.
+ * Logs showed a single short retry clears most rate limiting.
+ */
+export const THREAD_FETCH_RETRY_DELAYS_MS: readonly number[] = [300, 1000];
 /** Stop scanning after this many threads (Apps Script time limits) */
 export const MAX_THREADS_TO_SCAN = 300;
 
 export const HOMEPAGE_DISPLAY_LIMIT = 15;
-
-/** GmailLabel.addToThreads / removeFromThreads accept at most 100 threads per call */
-export const LABEL_BATCH_SIZE = 100;
 
 export const SOURCE_REPO_URL = "https://github.com/vallode/sequel-for-gmail";
 

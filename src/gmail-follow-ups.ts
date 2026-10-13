@@ -3,40 +3,27 @@ import {
   parseCachedFollowUps,
   serializeCachedFollowUps,
 } from "./cache-key.ts";
-import { CACHE_TTL_SECONDS, MAX_CACHE_VALUE_BYTES } from "./constants.ts";
+import {
+  CACHE_TTL_SECONDS,
+  FOLLOWUP_WAITING_LABEL,
+  MAX_CACHE_VALUE_BYTES,
+} from "./constants.ts";
 import { buildSearchQuery } from "./dates.ts";
 import { parseExcludedDomainList } from "./email-utils.ts";
-import { filterThreadsToPending, paginateSearch } from "./follow-ups-core.ts";
+import { filterThreadsToPending } from "./follow-ups-core.ts";
+import type { ThreadMetadata } from "./gmail-api-core.ts";
 import { diffLabelMembership } from "./labels-core.ts";
 import { log, perf } from "./log.ts";
 import {
-  addLabelToThreads,
-  ensureFollowUpLabels,
-  listLabelThreads,
-  removeLabelFromThreads,
-} from "./runtime/labels.ts";
+  addLabelToMessages,
+  fetchThreadMetadata,
+  listThreadIdsWithLabel,
+  removeLabelFromThreadIds,
+  searchThreadIds,
+} from "./runtime/gmail-api.ts";
+import { ensureFollowUpLabels } from "./runtime/labels.ts";
 import { getMyDomain, getMyEmail } from "./runtime/session-email.ts";
-import type {
-  FollowUpQueryResult,
-  PendingEmail,
-  ThreadInput,
-  UserSettings,
-} from "./types.ts";
-
-function mapGmailThreads(
-  threads: GoogleAppsScript.Gmail.GmailThread[],
-  allMessages: GoogleAppsScript.Gmail.GmailMessage[][],
-): ThreadInput[] {
-  return threads.map((thread, i) => ({
-    threadId: thread.getId(),
-    messages: allMessages[i].map((msg) => ({
-      from: msg.getFrom(),
-      to: msg.getTo(),
-      date: new Date(msg.getDate().getTime()),
-      subject: msg.getSubject(),
-    })),
-  }));
-}
+import type { FollowUpQueryResult, PendingEmail, UserSettings } from "./types.ts";
 
 /**
  * Keeps `Follow-ups/Waiting` equal to the current follow-up list: labels new
@@ -44,27 +31,29 @@ function mapGmailThreads(
  * when the search was truncated, since unscanned threads may still be pending.
  */
 function syncWaitingLabel(
-  scanned: GoogleAppsScript.Gmail.GmailThread[],
+  scanned: ThreadMetadata[],
   emails: PendingEmail[],
   searchTruncated: boolean,
-): void {
-  const { waiting } = ensureFollowUpLabels();
-  const labelled = listLabelThreads(waiting);
+): { labelled: number; added: number; removed: number } {
+  ensureFollowUpLabels();
+  const labelled = listThreadIdsWithLabel(FOLLOWUP_WAITING_LABEL);
+  if (labelled.truncated) log.warn("waiting label listing truncated");
   const changes = diffLabelMembership(
     new Set(emails.map((e) => e.threadId)),
-    new Set(labelled.map((t) => t.getId())),
+    new Set(labelled.items),
     !searchTruncated,
   );
   const toAdd = new Set(changes.add);
-  const toRemove = new Set(changes.remove);
-  addLabelToThreads(
-    waiting,
-    scanned.filter((t) => toAdd.has(t.getId())),
+  addLabelToMessages(
+    FOLLOWUP_WAITING_LABEL,
+    scanned.filter((t) => toAdd.has(t.thread.threadId)).flatMap((t) => t.messageIds),
   );
-  removeLabelFromThreads(
-    waiting,
-    labelled.filter((t) => toRemove.has(t.getId())),
-  );
+  removeLabelFromThreadIds(FOLLOWUP_WAITING_LABEL, changes.remove);
+  return {
+    labelled: labelled.items.length,
+    added: changes.add.length,
+    removed: changes.remove.length,
+  };
 }
 
 function tryWriteCache(
@@ -119,67 +108,96 @@ export function getPendingFollowUps(
 
   const query = buildSearchQuery(staleCutoff, cutoff);
 
-  let collected: GoogleAppsScript.Gmail.GmailThread[] = [];
+  let threadIds: string[] = [];
   let searchTruncated = false;
 
   const t1 = Date.now();
   try {
-    const result = paginateSearch((start, max) => GmailApp.search(query, start, max));
-    collected = result.items;
+    const result = searchThreadIds(query);
+    threadIds = result.items;
     searchTruncated = result.truncated;
   } catch (err) {
     log.error("Gmail search failed", { error: err });
-    return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt };
+    const error = `Gmail search failed: ${err instanceof Error ? err.message : "unknown"}`;
+    return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt, error };
   }
-  perf("GmailApp.search", t1, { threads: collected.length });
+  perf("Threads.list", t1, { threads: threadIds.length, searchTruncated });
 
   const myEmail = getMyEmail();
   const myDomain = getMyDomain();
   const domainList = parseExcludedDomainList(settings.excludedDomains);
 
-  let threadInputs: ThreadInput[] = [];
+  let scanned: ThreadMetadata[] = [];
+  let fetchFailed = 0;
   const t2 = Date.now();
   try {
-    const allMessages = GmailApp.getMessagesForThreads(collected);
-    threadInputs = mapGmailThreads(collected, allMessages);
+    const result = fetchThreadMetadata(threadIds);
+    scanned = result.threads;
+    fetchFailed = result.failed;
+    if (fetchFailed > 0) {
+      log.warn("some threads could not be fetched", {
+        failed: fetchFailed,
+        firstError: result.firstError,
+      });
+      // Nothing usable came back: report the error instead of an empty list
+      if (scanned.length === 0) {
+        return {
+          emails: [],
+          threadsScanned: threadIds.length,
+          searchTruncated,
+          fetchedAt,
+          error: `Could not load threads (${result.firstError ?? "unknown error"})`,
+        };
+      }
+      // Unfetched threads may still be pending; flag the list as incomplete
+      // so the UI says so and the waiting label is not pruned.
+      searchTruncated = true;
+    }
   } catch (err) {
-    log.error("getMessagesForThreads failed", { error: err });
+    log.error("thread metadata fetch failed", { error: err });
+    const error = `Could not load threads: ${err instanceof Error ? err.message : "unknown"}`;
     return {
       emails: [],
-      threadsScanned: collected.length,
+      threadsScanned: threadIds.length,
       searchTruncated,
       fetchedAt,
+      error,
     };
   }
-  perf("GmailApp.getMessagesForThreads", t2, { threads: collected.length });
+  perf("threads.get metadata", t2, { threads: scanned.length, failed: fetchFailed });
 
-  const emails = filterThreadsToPending(threadInputs, {
-    cutoff,
-    staleCutoff,
-    excludeReplied: settings.excludeReplied,
-    excludeInternal: settings.excludeInternal,
-    excludedDomainList: domainList,
-    myEmail,
-    myDomain,
-  });
+  const emails = filterThreadsToPending(
+    scanned.map((t) => t.thread),
+    {
+      cutoff,
+      staleCutoff,
+      excludeReplied: settings.excludeReplied,
+      excludeInternal: settings.excludeInternal,
+      excludedDomainList: domainList,
+      myEmail,
+      myDomain,
+    },
+  );
 
+  const t3 = Date.now();
   try {
-    syncWaitingLabel(collected, emails, searchTruncated);
+    perf("syncWaitingLabel", t3, syncWaitingLabel(scanned, emails, searchTruncated));
   } catch (err) {
     log.error("waiting label sync failed", { error: err });
   }
 
-  tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
+  // A partial fetch is worth showing but not caching; the next load retries it
+  if (fetchFailed === 0) tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
 
   perf("getPendingFollowUps", t0, {
     pending: emails.length,
-    threads: collected.length,
+    threads: threadIds.length,
     searchTruncated,
   });
 
   return {
     emails,
-    threadsScanned: collected.length,
+    threadsScanned: threadIds.length,
     searchTruncated,
     fetchedAt,
   };

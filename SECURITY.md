@@ -33,6 +33,7 @@ The add-on requests OAuth scopes limited to:
 - Modifying Gmail (**read** mail, **manage labels**, and **create drafts** — it does not send mail)
 - Reading the active user’s **email address**
 - Managing the add-on's own **time-driven trigger** (hourly auto follow-up check, only while enabled)
+- Connecting to an **external service**, restricted by the manifest's `urlFetchWhitelist` to `https://gmail.googleapis.com/` (the Gmail API batch endpoint, for thread-metadata requests)
 
 Mail is accessed only to build the follow-up list, apply its `Follow-ups/*` labels, and, when auto follow-up is on, create draft replies on threads you flagged. Drafts are never sent automatically. Dismissed state and settings stay in your Google account’s Apps Script user properties.
 

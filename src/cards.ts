@@ -10,8 +10,13 @@ import { dismissedThreadIds } from "./dismissed-store.ts";
 import { applySortOrder } from "./follow-ups-core.ts";
 import { getPendingFollowUps } from "./gmail-follow-ups.ts";
 import { log, perf } from "./log.ts";
+import { requireFullAuthorization } from "./runtime/authorization.ts";
 import { getMyDomain } from "./runtime/session-email.ts";
-import { readDismissedList, readUserSettings } from "./runtime/user-props.ts";
+import {
+  readDismissedList,
+  readHomepageProps,
+  readUserSettings,
+} from "./runtime/user-props.ts";
 import { autoFollowUpFieldNames, defaultAutoFollowUpSteps } from "./settings.ts";
 import type {
   ActionEvent,
@@ -19,7 +24,7 @@ import type {
   PendingEmail,
   UserSettings,
 } from "./types.ts";
-import { truncate } from "./util.ts";
+import { escapeHtml, truncate } from "./util.ts";
 
 function buildSettingsSection(
   settings: UserSettings,
@@ -173,9 +178,19 @@ export function buildResultsSection(
   searchTruncated: boolean,
   fetchedAt: Date,
   autoFollowUpThreadIds: Set<string> | null = null,
+  error?: string,
 ): GoogleAppsScript.Card_Service.CardSection {
   const section = CardService.newCardSection();
   section.addWidget(buildFreshnessWidget(fetchedAt));
+
+  if (error) {
+    section.addWidget(
+      CardService.newTextParagraph().setText(
+        `<b>Couldn't load your follow-ups.</b><br>${escapeHtml(error)}<br>Try Refresh; if it keeps failing, re-open the add-on to re-authorize.`,
+      ),
+    );
+    return section;
+  }
 
   if (emails.length === 0) {
     section.addWidget(
@@ -326,15 +341,14 @@ export function buildHomepageCard(
   ignoreCache = false,
 ): GoogleAppsScript.Card_Service.Card {
   const t0 = Date.now();
-  const settings = readUserSettings();
-  const { emails, searchTruncated, fetchedAt } = getPendingFollowUps(
+  requireFullAuthorization();
+  const props = readHomepageProps();
+  const { settings, sortAsc } = props;
+  const { emails, searchTruncated, fetchedAt, error } = getPendingFollowUps(
     settings,
     ignoreCache,
   );
-  const sortAsc =
-    PropertiesService.getUserProperties().getProperty("sort_order") !== "desc";
-
-  const dismissed = dismissedThreadIds(readDismissedList());
+  const dismissed = dismissedThreadIds(props.dismissed);
   const visibleEmails = emails.filter((e) => !dismissed.has(e.threadId));
 
   const card = CardService.newCardBuilder()
@@ -381,12 +395,14 @@ export function buildHomepageCard(
       searchTruncated,
       fetchedAt,
       autoFollowUpThreadIds,
+      error,
     ),
   );
   card.addSection(buildCatSection());
 
+  const built = card.build();
   perf("_buildHomepage", t0, { visible: visibleEmails.length });
-  return card.build();
+  return built;
 }
 
 export function buildDismissedCard(): GoogleAppsScript.Card_Service.Card {

@@ -9,3 +9,8 @@ export function chunk<T>(items: T[], size: number): T[][] {
   }
   return chunks;
 }
+
+/** For untrusted text inside Card Service HTML (TextParagraph, DecoratedText). */
+export function escapeHtml(str: string): string {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
