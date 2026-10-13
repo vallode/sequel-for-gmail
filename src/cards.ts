@@ -9,6 +9,7 @@ import { formatUpdatedLabel, getDayAge } from "./dates.ts";
 import { dismissedThreadIds } from "./dismissed-store.ts";
 import { applySortOrder } from "./follow-ups-core.ts";
 import { getPendingFollowUps } from "./gmail-follow-ups.ts";
+import { log, perf } from "./log.ts";
 import { getMyDomain } from "./runtime/session-email.ts";
 import { readDismissedList, readUserSettings } from "./runtime/user-props.ts";
 import { autoFollowUpFieldNames, defaultAutoFollowUpSteps } from "./settings.ts";
@@ -364,9 +365,7 @@ export function buildHomepageCard(
     try {
       autoFollowUpThreadIds = getAutoFollowUpThreadIds();
     } catch (err) {
-      console.log(
-        `[sequel] auto follow-up lookup failed: ${err instanceof Error ? err.message : "unknown"}`,
-      );
+      log.error("auto follow-up lookup failed", err);
       autoFollowUpThreadIds = new Set();
     }
     card.addSection(
@@ -386,7 +385,7 @@ export function buildHomepageCard(
   );
   card.addSection(buildCatSection());
 
-  console.log(`[sequel] _buildHomepage: ${Date.now() - t0}ms`);
+  perf("_buildHomepage", t0, { visible: visibleEmails.length });
   return card.build();
 }
 

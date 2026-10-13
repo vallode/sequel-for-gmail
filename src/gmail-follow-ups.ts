@@ -8,6 +8,7 @@ import { buildSearchQuery } from "./dates.ts";
 import { parseExcludedDomainList } from "./email-utils.ts";
 import { filterThreadsToPending, paginateSearch } from "./follow-ups-core.ts";
 import { diffLabelMembership } from "./labels-core.ts";
+import { log, perf } from "./log.ts";
 import {
   addLabelToThreads,
   ensureFollowUpLabels,
@@ -21,7 +22,6 @@ import type {
   ThreadInput,
   UserSettings,
 } from "./types.ts";
-import { perf } from "./util.ts";
 
 function mapGmailThreads(
   threads: GoogleAppsScript.Gmail.GmailThread[],
@@ -78,9 +78,7 @@ function tryWriteCache(
     if (payload.length > MAX_CACHE_VALUE_BYTES) return;
     CacheService.getUserCache().put(cacheKey, payload, CACHE_TTL_SECONDS);
   } catch (err) {
-    console.log(
-      `[sequel] cache write skipped: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.warn("cache write skipped", err);
   }
 }
 
@@ -98,7 +96,7 @@ export function getPendingFollowUps(
       if (hit) {
         const restored = parseCachedFollowUps(hit);
         if (restored) {
-          perf("getPendingFollowUps (cache hit)", t0);
+          perf("getPendingFollowUps", t0, { cacheHit: true });
           return {
             emails: restored.emails,
             threadsScanned: 0,
@@ -108,9 +106,7 @@ export function getPendingFollowUps(
         }
       }
     } catch (err) {
-      console.log(
-        `[sequel] cache read skipped: ${err instanceof Error ? err.message : "unknown"}`,
-      );
+      log.warn("cache read skipped", err);
     }
   }
 
@@ -132,12 +128,10 @@ export function getPendingFollowUps(
     collected = result.items;
     searchTruncated = result.truncated;
   } catch (err) {
-    console.log(
-      `[sequel] Gmail search failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("Gmail search failed", err);
     return { emails: [], threadsScanned: 0, searchTruncated: false, fetchedAt };
   }
-  perf(`GmailApp.search (${collected.length} threads)`, t1);
+  perf("GmailApp.search", t1, { threads: collected.length });
 
   const myEmail = getMyEmail();
   const myDomain = getMyDomain();
@@ -149,9 +143,7 @@ export function getPendingFollowUps(
     const allMessages = GmailApp.getMessagesForThreads(collected);
     threadInputs = mapGmailThreads(collected, allMessages);
   } catch (err) {
-    console.log(
-      `[sequel] getMessagesForThreads failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("getMessagesForThreads failed", err);
     return {
       emails: [],
       threadsScanned: collected.length,
@@ -159,7 +151,7 @@ export function getPendingFollowUps(
       fetchedAt,
     };
   }
-  perf(`GmailApp.getMessagesForThreads (${collected.length} threads)`, t2);
+  perf("GmailApp.getMessagesForThreads", t2, { threads: collected.length });
 
   const emails = filterThreadsToPending(threadInputs, {
     cutoff,
@@ -174,14 +166,16 @@ export function getPendingFollowUps(
   try {
     syncWaitingLabel(collected, emails, searchTruncated);
   } catch (err) {
-    console.log(
-      `[sequel] waiting label sync failed: ${err instanceof Error ? err.message : "unknown"}`,
-    );
+    log.error("waiting label sync failed", err);
   }
 
   tryWriteCache(cacheKey, emails, searchTruncated, fetchedAt);
 
-  perf(`getPendingFollowUps (${emails.length}/${collected.length} threads)`, t0);
+  perf("getPendingFollowUps", t0, {
+    pending: emails.length,
+    threads: collected.length,
+    searchTruncated,
+  });
 
   return {
     emails,
