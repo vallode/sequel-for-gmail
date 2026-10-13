@@ -1,7 +1,7 @@
 import {
   MESSAGE_MODIFY_BATCH_SIZE,
   THREAD_FETCH_BATCH_SIZE,
-  THREAD_FETCH_RETRY_DELAY_MS,
+  THREAD_FETCH_RETRY_DELAYS_MS,
 } from "../constants.ts";
 import { type PaginatedSearchResult, paginateTokenSearch } from "../follow-ups-core.ts";
 import {
@@ -43,13 +43,17 @@ export function searchThreadIds(query: string): PaginatedSearchResult<string> {
 
 export interface ThreadMetadataResult {
   threads: ThreadMetadata[];
-  /** Threads that still failed after one retry */
+  /** Threads that still failed after the last retry */
   failed: number;
   /** First failure description, for logs and the error card */
   firstError?: string;
 }
 
-type ThreadRound = ThreadMetadataResult & { retry: string[] };
+type ThreadRound = ThreadMetadataResult & {
+  retry: string[];
+  /** Count of retryable responses by HTTP status, for logs */
+  retryStatuses: Record<number, number>;
+};
 
 /**
  * One round of fetches: thread IDs are grouped into Gmail batch requests
@@ -57,7 +61,7 @@ type ThreadRound = ThreadMetadataResult & { retry: string[] };
  * batch requests are sent together with UrlFetchApp.fetchAll.
  */
 function fetchRound(ids: string[], token: string): ThreadRound {
-  const round: ThreadRound = { threads: [], retry: [], failed: 0 };
+  const round: ThreadRound = { threads: [], retry: [], failed: 0, retryStatuses: {} };
 
   const record = (id: string, status: number, body: string) => {
     if (status === 200) {
@@ -66,6 +70,7 @@ function fetchRound(ids: string[], token: string): ThreadRound {
       else round.failed++;
     } else if (isRetryableStatus(status)) {
       round.retry.push(id);
+      round.retryStatuses[status] = (round.retryStatuses[status] ?? 0) + 1;
     } else {
       // 404 means the thread was deleted between search and fetch
       if (status !== 404 && !round.firstError) {
@@ -131,38 +136,87 @@ function fetchRound(ids: string[], token: string): ThreadRound {
 /**
  * Fetches From/To/Subject/date for each thread via the Gmail API (metadata
  * format, no bodies) using batch requests. Rate-limited or 5xx calls are
- * retried once after a short pause.
+ * retried after each delay in THREAD_FETCH_RETRY_DELAYS_MS.
  */
 export function fetchThreadMetadata(threadIds: string[]): ThreadMetadataResult {
   const token = ScriptApp.getOAuthToken();
-  const first = fetchRound(threadIds, token);
-  const threads = first.threads;
-  let failed = first.failed;
-  let firstError = first.firstError;
+  let round = fetchRound(threadIds, token);
+  const threads = round.threads;
+  let failed = round.failed;
+  let firstError = round.firstError;
 
-  if (first.retry.length > 0) {
-    log.warn("retrying threads.get requests", undefined, { count: first.retry.length });
-    Utilities.sleep(THREAD_FETCH_RETRY_DELAY_MS);
-    const second = fetchRound(first.retry, token);
-    threads.push(...second.threads);
-    failed += second.failed + second.retry.length;
-    firstError ??= second.firstError;
-    if (second.retry.length > 0) firstError ??= "Gmail API rate limit or server error";
+  for (const delayMs of THREAD_FETCH_RETRY_DELAYS_MS) {
+    if (round.retry.length === 0) break;
+    log.warn("retrying threads.get requests", undefined, {
+      count: round.retry.length,
+      statuses: round.retryStatuses,
+      delayMs,
+    });
+    Utilities.sleep(delayMs);
+    round = fetchRound(round.retry, token);
+    threads.push(...round.threads);
+    failed += round.failed;
+    firstError ??= round.firstError;
+  }
+  if (round.retry.length > 0) {
+    failed += round.retry.length;
+    firstError ??= "Gmail API rate limit or server error";
   }
 
   return { threads, failed, firstError };
 }
 
+const labelIds = new Map<string, string>();
+
+/** Gmail API label ID for a user label name (case-insensitive), cached per execution. */
+function getLabelId(labelName: string): string {
+  const key = labelName.toLowerCase();
+  const cached = labelIds.get(key);
+  if (cached) return cached;
+  for (const label of gmailApi().Users.Labels.list("me").labels ?? []) {
+    if (label.name && label.id) labelIds.set(label.name.toLowerCase(), label.id);
+  }
+  const id = labelIds.get(key);
+  if (!id) throw new Error(`Label not found: ${labelName}`);
+  return id;
+}
+
+/**
+ * IDs of threads carrying the label. Threads.list skips trash and spam by
+ * default, so no per-thread trash check is needed.
+ */
+export function listThreadIdsWithLabel(
+  labelName: string,
+): PaginatedSearchResult<string> {
+  const labelId = getLabelId(labelName);
+  return paginateTokenSearch((pageToken, maxResults) => {
+    const args: { labelIds: string[]; maxResults: number; pageToken?: string } = {
+      labelIds: [labelId],
+      maxResults,
+    };
+    if (pageToken) args.pageToken = pageToken;
+    const res = gmailApi().Users.Threads.list("me", args);
+    return {
+      items: (res.threads ?? []).map((t) => t.id).filter((id): id is string => !!id),
+      nextPageToken: res.nextPageToken,
+    };
+  });
+}
+
 /** Labels messages in bulk; `labelName` must already exist. */
 export function addLabelToMessages(labelName: string, messageIds: string[]): void {
   if (messageIds.length === 0) return;
-  const api = gmailApi();
-  const wanted = labelName.toLowerCase();
-  const label = (api.Users.Labels.list("me").labels ?? []).find(
-    (l) => l.name?.toLowerCase() === wanted,
-  );
-  if (!label?.id) throw new Error(`Label not found: ${labelName}`);
+  const labelId = getLabelId(labelName);
   for (const ids of chunk(messageIds, MESSAGE_MODIFY_BATCH_SIZE)) {
-    api.Users.Messages.batchModify({ ids, addLabelIds: [label.id] }, "me");
+    gmailApi().Users.Messages.batchModify({ ids, addLabelIds: [labelId] }, "me");
+  }
+}
+
+/** Removes a label from whole threads; usually only a few per refresh. */
+export function removeLabelFromThreadIds(labelName: string, threadIds: string[]): void {
+  if (threadIds.length === 0) return;
+  const labelId = getLabelId(labelName);
+  for (const id of threadIds) {
+    gmailApi().Users.Threads.modify({ removeLabelIds: [labelId] }, "me", id);
   }
 }

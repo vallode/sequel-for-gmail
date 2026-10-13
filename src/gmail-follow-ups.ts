@@ -17,13 +17,11 @@ import { log, perf } from "./log.ts";
 import {
   addLabelToMessages,
   fetchThreadMetadata,
+  listThreadIdsWithLabel,
+  removeLabelFromThreadIds,
   searchThreadIds,
 } from "./runtime/gmail-api.ts";
-import {
-  ensureFollowUpLabels,
-  listLabelThreads,
-  removeLabelFromThreads,
-} from "./runtime/labels.ts";
+import { ensureFollowUpLabels } from "./runtime/labels.ts";
 import { getMyDomain, getMyEmail } from "./runtime/session-email.ts";
 import type { FollowUpQueryResult, PendingEmail, UserSettings } from "./types.ts";
 
@@ -37,23 +35,28 @@ function syncWaitingLabel(
   emails: PendingEmail[],
   searchTruncated: boolean,
 ): void {
-  const { waiting } = ensureFollowUpLabels();
-  const labelled = listLabelThreads(waiting);
+  ensureFollowUpLabels();
+  const t0 = Date.now();
+  const labelled = listThreadIdsWithLabel(FOLLOWUP_WAITING_LABEL);
+  perf("listThreadIdsWithLabel", t0, {
+    threads: labelled.items.length,
+    truncated: labelled.truncated,
+  });
   const changes = diffLabelMembership(
     new Set(emails.map((e) => e.threadId)),
-    new Set(labelled.map((t) => t.getId())),
+    new Set(labelled.items),
     !searchTruncated,
   );
   const toAdd = new Set(changes.add);
-  const toRemove = new Set(changes.remove);
   addLabelToMessages(
     FOLLOWUP_WAITING_LABEL,
     scanned.filter((t) => toAdd.has(t.thread.threadId)).flatMap((t) => t.messageIds),
   );
-  removeLabelFromThreads(
-    waiting,
-    labelled.filter((t) => toRemove.has(t.getId())),
-  );
+  removeLabelFromThreadIds(FOLLOWUP_WAITING_LABEL, changes.remove);
+  log.debug("waiting label changes", {
+    added: changes.add.length,
+    removed: changes.remove.length,
+  });
 }
 
 function tryWriteCache(
